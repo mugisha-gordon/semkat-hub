@@ -1,4 +1,4 @@
-import { Heart, MapPin, Maximize, Bed, Bath } from 'lucide-react';
+import { Heart, MapPin, Maximize, Bed, Bath, Move3D } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,8 +60,14 @@ const PropertyCard = ({ property, onSelect }: PropertyCardProps) => {
         </div>
 
         {/* Property type badge */}
-        <div className="absolute bottom-3 left-3">
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
           <Badge variant="orange">{getPropertyTypeLabel(property.type)}</Badge>
+          {(property.type === 'residential' || property.type === 'commercial' || property.type === 'rental' || property.type === 'land' || property.type === 'agricultural') && (
+            <div className="flex items-center gap-1 bg-sky/90 text-white px-2 py-1 rounded-full text-xs font-medium backdrop-blur-sm">
+              <Move3D className="h-3 w-3" />
+              <span>3D Tour</span>
+            </div>
+          )}
         </div>
       </div>
 
