@@ -8,11 +8,11 @@ const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navLinks = [
+    { label: 'Explore', href: '/explore' },
     { label: 'Properties', href: '/properties' },
-    { label: 'Land', href: '/properties?type=land' },
-    { label: 'Rentals', href: '/properties?type=rental' },
     { label: 'Services', href: '/services' },
     { label: 'Agents', href: '/agents' },
+    { label: 'Settings', href: '/settings' },
     { label: 'About', href: '/about' },
   ];
 
@@ -47,9 +47,7 @@ const Header = () => {
       {/* Main header */}
       <div className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-hero">
-            <span className="font-heading text-xl font-bold text-primary-foreground">S</span>
-          </div>
+          <img src="/LOGO.svg" alt="Semkat logo" className="h-10 w-10 rounded-lg object-contain bg-white shadow" />
           <span className="font-heading text-xl font-bold text-foreground">
             Semkat
           </span>
@@ -73,8 +71,8 @@ const Header = () => {
           <Button variant="ghost" size="icon" className="hidden md:flex">
             <User className="h-5 w-5" />
           </Button>
-          <Button variant="hero" className="hidden sm:flex">
-            List Property
+          <Button variant="hero" className="hidden sm:flex" asChild>
+            <Link to="/auth">Login</Link>
           </Button>
           
           {/* Mobile menu button */}
@@ -108,8 +106,8 @@ const Header = () => {
             </Link>
           ))}
           <div className="border-t my-2" />
-          <Button variant="hero" className="w-full mt-2">
-            List Property
+          <Button variant="hero" className="w-full mt-2" asChild>
+            <Link to="/auth">Login</Link>
           </Button>
         </nav>
       </div>

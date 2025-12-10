@@ -212,7 +212,15 @@ const VirtualTour3D = ({ propertyType, rooms = defaultRooms, panoramaUrl }: Virt
           shadow-mapSize={[1024, 1024]}
         />
         
-        <Suspense fallback={null}>
+        <Suspense
+          fallback={
+            <Html center>
+              <div className="px-3 py-2 rounded-lg bg-white/80 text-xs text-slate-700 shadow">
+                Loading 3D tour...
+              </div>
+            </Html>
+          }
+        >
           {viewMode === '360' && panoramaUrl ? (
             <PanoramaSphere url={panoramaUrl} />
           ) : (

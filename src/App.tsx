@@ -7,26 +7,58 @@ import Index from "./pages/Index";
 import Properties from "./pages/Properties";
 import Services from "./pages/Services";
 import Agents from "./pages/Agents";
+import About from "./pages/About";
+import Favorites from "./pages/Favorites";
+import Notifications from "./pages/Notifications";
+import Auth from "./pages/Auth";
+import Admin from "./pages/Admin";
+import Explore from "./pages/Explore";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import StatusBar from "./components/layout/StatusBar";
+import { AuthProvider } from "./context/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
+import { ThemeProvider } from "./components/theme-provider";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/properties" element={<Properties />} />
-          <Route path="/services" element={<Services />} />
-          <Route path="/services/:serviceId" element={<Services />} />
-          <Route path="/agents" element={<Agents />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <ThemeProvider>
+        <AuthProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <div className="pb-24">
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/properties" element={<Properties />} />
+                <Route path="/services" element={<Services />} />
+                <Route path="/services/:serviceId" element={<Services />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/explore" element={<Explore />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/favorites" element={<Favorites />} />
+                <Route path="/notifications" element={<Notifications />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute requireRole="admin">
+                      <Admin />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </div>
+            <StatusBar />
+          </BrowserRouter>
+        </AuthProvider>
+      </ThemeProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

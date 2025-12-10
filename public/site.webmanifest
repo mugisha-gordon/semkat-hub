@@ -1,0 +1,24 @@
+{
+  "name": "Semkat Group Uganda Ltd",
+  "short_name": "Semkat",
+  "theme_color": "#0c1324",
+  "background_color": "#0c1324",
+  "display": "standalone",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/LOGO.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/LOGO.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon",
+      "purpose": "any"
+    }
+  ]
+}
+

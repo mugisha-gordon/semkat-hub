@@ -1,73 +1,56 @@
-# Welcome to your Lovable project
+# Semkat Hub — Futuristic Real Estate Super-App
 
-## Project info
+Semkat Hub unifies listings, documentation, construction, financing, rentals, and immersive media into a single experience for buyers, agents, and admins. Branded with Semkat’s orange/sky palette and built for both local and international users.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Stack
+- Vite + React + TypeScript
+- Tailwind + shadcn/ui
+- React Router
+- React Query
+- Supabase (auth-ready)
+- Three.js / @react-three/fiber (3D/360)
 
-## How can I edit this code?
+## Core Features
+- Listings with filters, detail modals, and 3D/360 tour support.
+- Explore feed (TikTok-style property videos).
+- Auth with email/password (Supabase) and role metadata (user/agent/admin); protected admin route.
+- Settings with light/dark/system theme toggle (persisted), notifications placeholders.
+- Bottom futuristic status bar for primary nav.
 
-There are several ways of editing your application.
+## Branding
+- Primary assets: `public/LOGO.svg`, `public/LOGO.ico`
+- Favicons and manifest wired in `index.html` and `public/site.webmanifest`.
 
-**Use Lovable**
+## Routes
+- `/` Home
+- `/properties` Listings
+- `/services` Services hub
+- `/agents` Agents
+- `/explore` Video feed
+- `/favorites` Saved
+- `/notifications` Alerts
+- `/settings` Appearance/notifications/locale
+- `/auth` Login/Register
+- `/admin` Admin dashboard (requires role `admin`)
+- `*` Not Found
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+## Local Development
+```bash
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Set environment variables (create `.env`):
+```
+VITE_SUPABASE_URL=your_url
+VITE_SUPABASE_PUBLISHABLE_KEY=your_key
+```
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Theming
+- Uses `next-themes` with light/dark/system.
+- CSS variables in `src/index.css` & Tailwind tokens in `tailwind.config.ts`.
 
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## Next Steps
+- Wire Supabase tables for listings, favorites, notifications, video uploads, and agent approvals.
+- Add map view with clustering and saved-search alerts.
+- Add upload & moderation flow for Explore feed.
