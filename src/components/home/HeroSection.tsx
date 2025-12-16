@@ -42,7 +42,7 @@ const HeroSection = () => {
           {/* Headline */}
           <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-bold text-background leading-tight mb-6 animate-slide-up">
             Invest in Your Future with{' '}
-            <span className="text-gradient bg-gradient-hero">Semkat</span>
+            <span className="text-gradient bg-gradient-hero">Semkat Group Uganda Limited</span>
           </h1>
 
           <p className="text-lg sm:text-xl text-background/80 max-w-2xl mb-10 animate-slide-up" style={{ animationDelay: '0.1s' }}>
