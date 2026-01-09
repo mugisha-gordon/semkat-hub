@@ -17,13 +17,32 @@ const OnboardingWrapper = ({ children }: { children: React.ReactNode }) => {
     if (isNewUser) {
       setShowOnboarding(true);
     } else if (user) {
-      // Show welcome back for returning users (only once per session)
-      const welcomeBackShown = sessionStorage.getItem("semkat_welcome_back_shown");
-      if (!welcomeBackShown) {
+      // Show welcome back EVERY time the app is returned to (using visibility change)
+      // On initial mount, also show if not shown in this page load
+      const shownThisLoad = sessionStorage.getItem("semkat_welcome_back_current_load");
+      if (!shownThisLoad) {
         setShowWelcomeBack(true);
-        sessionStorage.setItem("semkat_welcome_back_shown", "true");
+        sessionStorage.setItem("semkat_welcome_back_current_load", "true");
       }
     }
+  }, [user, loading]);
+
+  // Listen for visibility change to show welcome back when app is returned to
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user && !loading) {
+        const onboardingCompleted = localStorage.getItem("semkat_onboarding_completed");
+        if (onboardingCompleted) {
+          // Reset the current load flag when becoming visible again
+          sessionStorage.removeItem("semkat_welcome_back_current_load");
+          setShowWelcomeBack(true);
+          sessionStorage.setItem("semkat_welcome_back_current_load", "true");
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [user, loading]);
 
   const handleOnboardingComplete = () => {

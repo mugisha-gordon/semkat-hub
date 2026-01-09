@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ShieldCheck, Users, FileText, Bell, UserPlus, Check, X, Clock } from "lucide-react";
+import { ShieldCheck, Users, FileText, Bell, UserPlus, Check, X, Clock, Trash2, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { getAgentApplications, approveAgentApplication, rejectAgentApplication } from "@/integrations/firebase/agentApplications";
@@ -16,11 +16,12 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { createUserDocument } from "@/integrations/firebase/users";
 import type { AgentApplicationDocument } from "@/integrations/firebase/types";
 import type { UserDocument } from "@/integrations/firebase/types";
-import { Trash2, AlertTriangle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { firebaseConfig } from "@/integrations/firebase/config";
+import PropertyPostForm from "@/components/property/PropertyPostForm";
+import VideoPostForm from "@/components/video/VideoPostForm";
 
 interface AgentApplication {
   id: string;
@@ -205,50 +206,53 @@ const AdminDashboard = () => {
     <div className="min-h-screen flex flex-col bg-slate-950 text-white">
       <Header />
 
-      <main className="flex-1 py-12">
-        <div className="container space-y-8">
-          <div className="flex items-center justify-between flex-wrap gap-4">
+      <main className="flex-1 py-8 sm:py-12">
+        <div className="container space-y-6 sm:space-y-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <p className="text-white/70 text-sm">Admin Control</p>
-              <h1 className="font-heading text-3xl font-bold">Semkat Command Center</h1>
-              <p className="text-white/60 text-sm mt-1">Signed in as {user?.email}</p>
+              <p className="text-white/70 text-xs sm:text-sm">Admin Control</p>
+              <h1 className="font-heading text-xl sm:text-3xl font-bold">Semkat Command Center</h1>
+              <p className="text-white/60 text-xs sm:text-sm mt-1">Signed in as {user?.email}</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-2 sm:gap-3">
+              {user && <PropertyPostForm agentId={user.uid} onSuccess={() => {}} />}
+              {user && <VideoPostForm onSuccess={() => {}} />}
               <Dialog open={isRegisterOpen} onOpenChange={setIsRegisterOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="hero" className="gap-2">
-                    <UserPlus className="h-4 w-4" />
-                    Register Agent
+                  <Button variant="hero" className="gap-2 text-xs sm:text-sm">
+                    <UserPlus className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Register Agent</span>
+                    <span className="sm:hidden">Agent</span>
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="bg-slate-900 border-white/10 text-white">
+                <DialogContent className="bg-slate-900 border-white/10 text-white max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle className="font-heading text-xl">Register New Agent</DialogTitle>
+                    <DialogTitle className="font-heading text-lg sm:text-xl">Register New Agent</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleRegisterAgent} className="space-y-4 mt-4">
                     <div className="space-y-2">
-                      <Label>Full Name</Label>
+                      <Label className="text-sm">Full Name</Label>
                       <Input
                         value={registerForm.fullName}
                         onChange={(e) => setRegisterForm(p => ({ ...p, fullName: e.target.value }))}
                         placeholder="Agent full name"
                         required
-                        className="bg-white/5 border-white/20"
+                        className="bg-white/5 border-white/20 text-sm"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Email</Label>
+                      <Label className="text-sm">Email</Label>
                       <Input
                         type="email"
                         value={registerForm.email}
                         onChange={(e) => setRegisterForm(p => ({ ...p, email: e.target.value }))}
                         placeholder="agent@email.com"
                         required
-                        className="bg-white/5 border-white/20"
+                        className="bg-white/5 border-white/20 text-sm"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Password</Label>
+                      <Label className="text-sm">Password</Label>
                       <Input
                         type="password"
                         value={registerForm.password}
@@ -256,25 +260,25 @@ const AdminDashboard = () => {
                         placeholder="Create a password"
                         required
                         minLength={6}
-                        className="bg-white/5 border-white/20"
+                        className="bg-white/5 border-white/20 text-sm"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Phone</Label>
+                      <Label className="text-sm">Phone</Label>
                       <Input
                         value={registerForm.phone}
                         onChange={(e) => setRegisterForm(p => ({ ...p, phone: e.target.value }))}
                         placeholder="+256..."
-                        className="bg-white/5 border-white/20"
+                        className="bg-white/5 border-white/20 text-sm"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Company (optional)</Label>
+                      <Label className="text-sm">Company (optional)</Label>
                       <Input
                         value={registerForm.company}
                         onChange={(e) => setRegisterForm(p => ({ ...p, company: e.target.value }))}
                         placeholder="Company name"
-                        className="bg-white/5 border-white/20"
+                        className="bg-white/5 border-white/20 text-sm"
                       />
                     </div>
                     <Button type="submit" variant="hero" className="w-full" disabled={registerLoading}>
@@ -283,7 +287,7 @@ const AdminDashboard = () => {
                   </form>
                 </DialogContent>
               </Dialog>
-              <Button variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={signOut}>
+              <Button variant="outline" className="border-white/30 text-white hover:bg-white/10 text-xs sm:text-sm" onClick={signOut}>
                 Sign out
               </Button>
             </div>

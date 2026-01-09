@@ -26,11 +26,16 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
   }
 
   // If a specific role is required, check for it
-  // Admin can access everything
+  // Admin can access everything (including agent dashboard)
   if (requireRole) {
     if (role === 'admin') {
       return <>{children}</>;
     }
+    // Agents can access agent routes
+    if (requireRole === 'agent' && role === 'agent') {
+      return <>{children}</>;
+    }
+    // If role doesn't match, redirect
     if (role !== requireRole) {
       return <Navigate to="/" replace />;
     }
