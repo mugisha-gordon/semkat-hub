@@ -23,6 +23,7 @@ import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ThemeProvider } from "./components/theme-provider";
 import OnboardingWrapper from "./components/onboarding/OnboardingWrapper";
+import BackButtonHandler from "./components/BackButtonHandler";
 
 const queryClient = new QueryClient();
 
@@ -35,6 +36,7 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <OnboardingWrapper>
+              <BackButtonHandler />
               <div className="pb-20 sm:pb-24">
                 <Routes>
                   <Route path="/" element={<Index />} />

@@ -119,6 +119,17 @@
     @apply border-border;
   }
 
+  html {
+    /* Responsive base font size */
+    font-size: 14px;
+  }
+
+  @media (min-width: 640px) {
+    html {
+      font-size: 16px;
+    }
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', sans-serif;

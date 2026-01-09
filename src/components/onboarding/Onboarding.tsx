@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Home, Search, Sparkles, MessageCircle, ArrowRight, ArrowLeft, Check } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -9,7 +8,6 @@ interface OnboardingProps {
 
 const Onboarding = ({ onComplete }: OnboardingProps) => {
   const [currentPage, setCurrentPage] = useState(0);
-  const navigate = useNavigate();
 
   const pages = [
     {
@@ -76,82 +74,82 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
       {/* Content */}
       <div className="relative h-full flex flex-col">
         {/* Skip button */}
-        <div className="absolute top-4 right-4 z-10">
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10">
           <Button
             variant="ghost"
             onClick={handleSkip}
-            className="text-white/70 hover:text-white hover:bg-white/10"
+            className="text-white/70 hover:text-white hover:bg-white/10 text-sm sm:text-base px-3 py-1.5 sm:px-4 sm:py-2"
           >
             Skip
           </Button>
         </div>
 
-        {/* Main content */}
-        <div className="flex-1 flex items-center justify-center px-6 py-12">
-          <div className="max-w-md w-full text-center space-y-8">
-            {/* Icon with gradient background */}
+        {/* Main content - responsive padding and sizing */}
+        <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-8 sm:py-12">
+          <div className="max-w-md w-full text-center space-y-4 sm:space-y-8">
+            {/* Icon with gradient background - smaller on mobile */}
             <div className="flex justify-center">
-              <div className={`relative p-8 rounded-3xl bg-gradient-to-br ${pages[currentPage].gradient} shadow-2xl animate-bounce-subtle`}>
-                <div className="absolute inset-0 rounded-3xl bg-white/20 blur-xl" />
-                <Icon className="relative h-16 w-16 text-white" />
+              <div className={`relative p-5 sm:p-8 rounded-2xl sm:rounded-3xl bg-gradient-to-br ${pages[currentPage].gradient} shadow-2xl animate-bounce-subtle`}>
+                <div className="absolute inset-0 rounded-2xl sm:rounded-3xl bg-white/20 blur-xl" />
+                <Icon className="relative h-10 w-10 sm:h-16 sm:w-16 text-white" />
               </div>
             </div>
 
-            {/* Title */}
-            <h1 className="font-heading text-4xl sm:text-5xl font-bold text-white">
+            {/* Title - responsive font size */}
+            <h1 className="font-heading text-2xl sm:text-4xl md:text-5xl font-bold text-white leading-tight">
               {pages[currentPage].title}
             </h1>
 
-            {/* Description */}
-            <p className="text-lg sm:text-xl text-white/80 leading-relaxed">
+            {/* Description - responsive font size */}
+            <p className="text-sm sm:text-lg md:text-xl text-white/80 leading-relaxed px-2">
               {pages[currentPage].description}
             </p>
           </div>
         </div>
 
-        {/* Bottom navigation */}
-        <div className="px-6 pb-8 sm:pb-12 space-y-6">
+        {/* Bottom navigation - responsive padding */}
+        <div className="px-4 sm:px-6 pb-6 sm:pb-12 space-y-4 sm:space-y-6">
           {/* Page indicators */}
-          <div className="flex justify-center gap-2">
+          <div className="flex justify-center gap-1.5 sm:gap-2">
             {pages.map((_, index) => (
               <button
                 key={index}
                 onClick={() => setCurrentPage(index)}
-                className={`h-2 rounded-full transition-all duration-300 ${
+                className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${
                   index === currentPage
-                    ? "w-8 bg-white"
-                    : "w-2 bg-white/30 hover:bg-white/50"
+                    ? "w-6 sm:w-8 bg-white"
+                    : "w-1.5 sm:w-2 bg-white/30 hover:bg-white/50"
                 }`}
               />
             ))}
           </div>
 
-          {/* Navigation buttons */}
-          <div className="flex gap-4">
+          {/* Navigation buttons - responsive sizing */}
+          <div className="flex gap-3 sm:gap-4">
             {currentPage > 0 && (
               <Button
                 variant="outline"
                 onClick={handlePrevious}
-                className="flex-1 border-white/20 text-white hover:bg-white/10 hover:border-white/30"
+                className="flex-1 border-white/20 text-white hover:bg-white/10 hover:border-white/30 text-sm sm:text-base py-2 sm:py-3"
               >
-                <ArrowLeft className="h-4 w-4 mr-2" />
+                <ArrowLeft className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                 Previous
               </Button>
             )}
             <Button
               onClick={handleNext}
               variant="hero"
-              className={`flex-1 ${currentPage === 0 ? "ml-auto" : ""}`}
+              className={`flex-1 text-sm sm:text-base py-2 sm:py-3 ${currentPage === 0 ? "ml-auto" : ""}`}
             >
               {currentPage === pages.length - 1 ? (
                 <>
                   Get Started
-                  <Check className="h-4 w-4 ml-2" />
+                  <Check className="h-3 w-3 sm:h-4 sm:w-4 ml-1 sm:ml-2" />
                 </>
               ) : (
                 <>
                   Next
-                  <ArrowRight className="h-4 w-4 ml-2" />
+                  <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 ml-1 sm:ml-2" />
                 </>
               )}
             </Button>
