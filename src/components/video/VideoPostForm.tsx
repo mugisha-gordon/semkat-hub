@@ -8,8 +8,9 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { createVideo } from "@/integrations/firebase/videos";
 import { uploadVideo } from "@/integrations/firebase/storage";
-import { Plus, Video, Upload, X } from "lucide-react";
+import { Plus, Video, Upload, X, Zap } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { compressVideo, shouldCompressVideo } from "@/utils/videoCompression";
 
 interface VideoPostFormProps {
   onSuccess?: () => void;
@@ -29,9 +30,12 @@ const VideoPostForm = ({
   const { user, role } = useAuth();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [compressionProgress, setCompressionProgress] = useState(0);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
+  const [originalSize, setOriginalSize] = useState<number>(0);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     title: "",
@@ -39,7 +43,7 @@ const VideoPostForm = ({
     description: "",
   });
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -56,11 +60,42 @@ const VideoPostForm = ({
       return;
     }
 
-    setVideoFile(file);
-    
-    // Create preview URL
-    const previewUrl = URL.createObjectURL(file);
-    setVideoPreview(previewUrl);
+    setOriginalSize(file.size);
+
+    // Check if compression is needed (files over 50MB)
+    if (shouldCompressVideo(file, 50)) {
+      setCompressing(true);
+      setCompressionProgress(0);
+      toast.loading('Compressing video for faster upload...', { id: 'compress-video' });
+      
+      try {
+        const compressedFile = await compressVideo(file, {
+          maxSizeMB: 50,
+          onProgress: setCompressionProgress,
+        });
+        
+        setVideoFile(compressedFile);
+        const previewUrl = URL.createObjectURL(compressedFile);
+        setVideoPreview(previewUrl);
+        
+        const savings = ((file.size - compressedFile.size) / file.size * 100).toFixed(1);
+        toast.success(`Video compressed! Saved ${savings}%`, { id: 'compress-video' });
+      } catch (error) {
+        console.error('Compression failed:', error);
+        // Use original file if compression fails
+        setVideoFile(file);
+        const previewUrl = URL.createObjectURL(file);
+        setVideoPreview(previewUrl);
+        toast.dismiss('compress-video');
+      } finally {
+        setCompressing(false);
+        setCompressionProgress(0);
+      }
+    } else {
+      setVideoFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setVideoPreview(previewUrl);
+    }
   };
 
   const handleRemoveVideo = () => {
@@ -69,6 +104,7 @@ const VideoPostForm = ({
     }
     setVideoFile(null);
     setVideoPreview(null);
+    setOriginalSize(0);
     if (videoInputRef.current) {
       videoInputRef.current.value = '';
     }
@@ -173,7 +209,19 @@ const VideoPostForm = ({
 
           <div className="space-y-2">
             <Label>Video File *</Label>
-            {!videoFile ? (
+            {compressing ? (
+              <div className="border-2 border-dashed border-semkat-orange/50 rounded-lg p-8 text-center">
+                <Zap className="h-12 w-12 text-semkat-orange mx-auto mb-2 animate-pulse" />
+                <span className="text-white/70">Compressing video...</span>
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-white/60">
+                    <span>Processing...</span>
+                    <span>{Math.round(compressionProgress)}%</span>
+                  </div>
+                  <Progress value={compressionProgress} className="h-2 bg-white/10" />
+                </div>
+              </div>
+            ) : !videoFile ? (
               <div className="border-2 border-dashed border-white/20 rounded-lg p-8 text-center hover:border-semkat-orange/50 transition-colors">
                 <input
                   ref={videoInputRef}
@@ -189,7 +237,7 @@ const VideoPostForm = ({
                 >
                   <Upload className="h-12 w-12 text-white/50" />
                   <span className="text-white/70">Click to upload video</span>
-                  <span className="text-xs text-white/50">MP4, MOV, AVI (Max 100MB)</span>
+                  <span className="text-xs text-white/50">MP4, MOV, AVI (Max 100MB) - Large files auto-compressed</span>
                 </label>
               </div>
             ) : (
@@ -218,9 +266,15 @@ const VideoPostForm = ({
                 >
                   <X className="h-4 w-4" />
                 </Button>
-                <p className="text-xs text-white/50 mt-2">
-                  File: {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(2)} MB)
-                </p>
+                <div className="text-xs text-white/50 mt-2 flex items-center gap-2">
+                  <span>File: {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  {originalSize > videoFile.size && (
+                    <span className="text-green-400 flex items-center gap-1">
+                      <Zap className="h-3 w-3" />
+                      Compressed from {(originalSize / 1024 / 1024).toFixed(2)} MB
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>

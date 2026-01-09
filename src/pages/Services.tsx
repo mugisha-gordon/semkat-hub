@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { 
   FileText, HardHat, CreditCard, Car, CheckCircle, 
-  ArrowRight, Phone, MessageCircle 
+  ArrowRight, Phone, MessageCircle, Wallet 
 } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card } from '@/components/ui/card';
@@ -52,21 +52,38 @@ const services = [
     description: 'Access flexible financing options for your property investment. We partner with leading financial institutions to offer competitive rates.',
     features: [
       'Mortgage facilitation',
-      'Installment plans',
       'Investment financing',
       'Developer partnerships',
       'Financial advisory',
       'Quick approvals',
+      'Flexible terms',
     ],
     color: 'bg-teal-100 text-teal-600',
     gradient: 'from-teal-500 to-teal-600',
   },
   {
+    id: 'installments',
+    icon: Wallet,
+    title: 'Payment in Instalments',
+    subtitle: 'Affordable Ownership',
+    description: 'Own your dream property without the financial strain. Our instalment payment plans make property ownership accessible to everyone.',
+    features: [
+      'Flexible payment schedules',
+      'Low down payments',
+      'No hidden fees',
+      'Customized plans',
+      '6-24 month terms',
+      'Easy application',
+    ],
+    color: 'bg-emerald-100 text-emerald-600',
+    gradient: 'from-emerald-500 to-emerald-600',
+  },
+  {
     id: 'vehicles',
     icon: Car,
-    title: 'Vehicle Marketplace',
+    title: 'Cars Sold',
     subtitle: 'Quality Vehicles',
-    description: 'Browse our curated selection of quality vehicles. From personal cars to commercial vehicles, find reliable transportation solutions.',
+    description: 'Browse our curated selection of quality vehicles. From personal cars to commercial vehicles, find reliable transportation solutions with financing options.',
     features: [
       'Quality inspected vehicles',
       'Financing available',
