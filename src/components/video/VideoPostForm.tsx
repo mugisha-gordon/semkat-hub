@@ -183,7 +183,10 @@ const VideoPostForm = ({
       }, 1000);
     } catch (error: any) {
       console.error("Error posting video:", error);
-      toast.error(error.message || "Failed to post video");
+      const code = error?.code ? ` (${error.code})` : "";
+      const message = error?.message || "Failed to post video";
+      // Common Firebase errors: storage/unauthorized, permission-denied
+      toast.error(`${message}${code}`);
       setStage('idle');
     } finally {
       setUploadProgress(0);

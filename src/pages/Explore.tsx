@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Heart, MessageCircle, Share2, Sparkles, Volume2, VolumeX, ChevronUp, ChevronDown, Trash2, MessageSquareText, Send } from "lucide-react";
-import { addVideoComment, deleteVideo, getVideos, subscribeToVideoComments, toggleVideoLike } from "@/integrations/firebase/videos";
+import { addVideoComment, deleteVideo, subscribeToVideoComments, toggleVideoLike } from "@/integrations/firebase/videos";
 import type { VideoCommentDocument, VideoDocument } from "@/integrations/firebase/videos";
 import { useAuth } from "@/context/AuthContext";
 import { getUserDocument } from "@/integrations/firebase/users";
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 import VideoPostForm from "@/components/video/VideoPostForm";
 import MessageDialog from "@/components/messaging/MessageDialog";
 import { deleteFile } from "@/integrations/firebase/storage";
+import { subscribeToVideosFeed } from "@/integrations/firebase/videosFeed";
 
 const Explore = () => {
   const { user } = useAuth();
@@ -32,73 +34,77 @@ const Explore = () => {
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const currentClip = clips[currentIndex];
 
+  const location = useLocation() as { state?: { fromUpload?: boolean } };
+
   useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        const videos = await getVideos({ limit: 30 });
+    setLoading(true);
+
+    const unsubscribe = subscribeToVideosFeed(
+      30,
+      (videos) => {
         setClips(videos);
-
-        // Fetch author names
-        const userIds = [...new Set(videos.map((v) => v.userId))];
-        const names: { [userId: string]: string } = {};
-        const avatars: { [userId: string]: string | undefined } = {};
-
-        await Promise.all(
-          userIds.map(async (userId) => {
-            try {
-              const userDoc = await getUserDocument(userId);
-              names[userId] = userDoc?.profile.fullName || 'Unknown';
-              avatars[userId] = userDoc?.profile.avatarUrl || undefined;
-            } catch {
-              names[userId] = 'Unknown';
-              avatars[userId] = undefined;
-            }
-          })
-        );
-        setAuthorNames(names);
-        setAuthorAvatars(avatars);
-      } catch (error) {
-        console.error('Error fetching videos:', error);
-        toast.error('Failed to load videos');
-      } finally {
+        setLoading(false);
+        setCurrentIndex((i) => Math.min(i, Math.max(0, videos.length - 1)));
+      },
+      (error) => {
+        console.error("Error subscribing to videos:", error);
+        toast.error("Failed to load videos");
         setLoading(false);
       }
-    };
+    );
 
-    fetchVideos();
+    return () => unsubscribe();
   }, []);
 
-  const refreshVideos = async () => {
-    try {
-      setLoading(true);
-      const videos = await getVideos({ limit: 30 });
-      setClips(videos);
+  // Keep author metadata in sync as the feed updates
+  useEffect(() => {
+    const userIds = [...new Set(clips.map((v) => v.userId))];
+    const missingIds = userIds.filter((id) => !authorNames[id]);
+    if (missingIds.length === 0) return;
 
-      const userIds = [...new Set(videos.map((v) => v.userId))];
-      const names: { [userId: string]: string } = {};
-      const avatars: { [userId: string]: string | undefined } = {};
+    Promise.all(
+      missingIds.map(async (userId) => {
+        try {
+          const userDoc = await getUserDocument(userId);
+          return {
+            userId,
+            name: userDoc?.profile.fullName || "Unknown",
+            avatar: userDoc?.profile.avatarUrl || undefined,
+          };
+        } catch {
+          return { userId, name: "Unknown", avatar: undefined };
+        }
+      })
+    )
+      .then((results) => {
+        setAuthorNames((prev) => {
+          const next = { ...prev };
+          results.forEach((r) => {
+            next[r.userId] = r.name;
+          });
+          return next;
+        });
+        setAuthorAvatars((prev) => {
+          const next = { ...prev };
+          results.forEach((r) => {
+            next[r.userId] = r.avatar;
+          });
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, [clips, authorNames]);
 
-      await Promise.all(
-        userIds.map(async (userId) => {
-          try {
-            const userDoc = await getUserDocument(userId);
-            names[userId] = userDoc?.profile.fullName || 'Unknown';
-            avatars[userId] = userDoc?.profile.avatarUrl || undefined;
-          } catch {
-            names[userId] = 'Unknown';
-            avatars[userId] = undefined;
-          }
-        })
-      );
-      setAuthorNames(names);
-      setAuthorAvatars(avatars);
-      setCurrentIndex((i) => Math.min(i, Math.max(0, videos.length - 1)));
-    } catch (error) {
-      console.error('Error refreshing videos:', error);
-      toast.error('Failed to refresh videos');
-    } finally {
-      setLoading(false);
+  // If we navigated here right after an upload, jump to the newest clip
+  useEffect(() => {
+    if (location.state?.fromUpload) {
+      setCurrentIndex(0);
     }
+  }, [location.state]);
+
+  const refreshVideos = async () => {
+    // kept for backwards compatibility with the upload button (realtime already updates)
+    setCurrentIndex(0);
   };
 
   const goToSlide = (index: number) => {
