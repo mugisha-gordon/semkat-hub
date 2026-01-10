@@ -120,11 +120,23 @@
   }
 
   html {
-    /* Responsive base font size */
-    font-size: 14px;
+    /* Responsive base font size - mobile first */
+    font-size: 13px;
+  }
+
+  @media (min-width: 375px) {
+    html {
+      font-size: 14px;
+    }
   }
 
   @media (min-width: 640px) {
+    html {
+      font-size: 15px;
+    }
+  }
+
+  @media (min-width: 1024px) {
     html {
       font-size: 16px;
     }
@@ -133,10 +145,42 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', sans-serif;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   h1, h2, h3, h4, h5, h6 {
     font-family: 'DM Sans', sans-serif;
+  }
+
+  /* Responsive text utilities */
+  .text-responsive-xs {
+    @apply text-[10px] xs:text-xs sm:text-sm;
+  }
+  
+  .text-responsive-sm {
+    @apply text-xs sm:text-sm md:text-base;
+  }
+  
+  .text-responsive-base {
+    @apply text-sm sm:text-base md:text-lg;
+  }
+  
+  .text-responsive-lg {
+    @apply text-base sm:text-lg md:text-xl;
+  }
+  
+  .text-responsive-xl {
+    @apply text-lg sm:text-xl md:text-2xl lg:text-3xl;
+  }
+  
+  .text-responsive-2xl {
+    @apply text-xl sm:text-2xl md:text-3xl lg:text-4xl;
+  }
+
+  /* Container padding responsive */
+  .container {
+    @apply px-3 sm:px-4 md:px-6 lg:px-8;
   }
 }
 
