@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { createVideo } from "@/integrations/firebase/videos";
 import { uploadVideo } from "@/integrations/firebase/storage";
-import { Plus, Video, Upload, X, Zap } from "lucide-react";
+import { Plus, Video, Upload, X, Zap, CheckCircle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { compressVideo, shouldCompressVideo } from "@/utils/videoCompression";
 
@@ -20,6 +20,8 @@ interface VideoPostFormProps {
   triggerLabel?: string;
 }
 
+type UploadStage = 'idle' | 'compressing' | 'uploading' | 'creating' | 'complete';
+
 const VideoPostForm = ({
   onSuccess,
   triggerVariant = "hero",
@@ -29,19 +31,36 @@ const VideoPostForm = ({
 }: VideoPostFormProps) => {
   const { user, role } = useAuth();
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [compressing, setCompressing] = useState(false);
+  const [stage, setStage] = useState<UploadStage>('idle');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [compressionProgress, setCompressionProgress] = useState(0);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
   const [originalSize, setOriginalSize] = useState<number>(0);
+  const [uploadSpeed, setUploadSpeed] = useState<string>('');
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const uploadStartTime = useRef<number>(0);
+  const lastBytesTransferred = useRef<number>(0);
   const [formData, setFormData] = useState({
     title: "",
     location: "",
     description: "",
   });
+
+  const calculateUploadSpeed = useCallback((bytesTransferred: number) => {
+    const now = Date.now();
+    const elapsed = (now - uploadStartTime.current) / 1000;
+    if (elapsed > 0.5) {
+      const bytesPerSecond = bytesTransferred / elapsed;
+      if (bytesPerSecond > 1024 * 1024) {
+        setUploadSpeed(`${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`);
+      } else if (bytesPerSecond > 1024) {
+        setUploadSpeed(`${(bytesPerSecond / 1024).toFixed(0)} KB/s`);
+      } else {
+        setUploadSpeed(`${bytesPerSecond.toFixed(0)} B/s`);
+      }
+    }
+  }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -53,24 +72,23 @@ const VideoPostForm = ({
       return;
     }
 
-    // Validate file size (100MB max)
-    const maxSize = 100 * 1024 * 1024;
+    // Increased max size to 200MB for better UX
+    const maxSize = 200 * 1024 * 1024;
     if (file.size > maxSize) {
-      toast.error('Video file size must be less than 100MB');
+      toast.error('Video file size must be less than 200MB');
       return;
     }
 
     setOriginalSize(file.size);
 
-    // Check if compression is needed (files over 50MB)
-    if (shouldCompressVideo(file, 50)) {
-      setCompressing(true);
+    // Only compress files over 30MB for faster uploads
+    if (shouldCompressVideo(file, 30)) {
+      setStage('compressing');
       setCompressionProgress(0);
-      toast.loading('Compressing video for faster upload...', { id: 'compress-video' });
       
       try {
         const compressedFile = await compressVideo(file, {
-          maxSizeMB: 50,
+          maxSizeMB: 30,
           onProgress: setCompressionProgress,
         });
         
@@ -79,16 +97,14 @@ const VideoPostForm = ({
         setVideoPreview(previewUrl);
         
         const savings = ((file.size - compressedFile.size) / file.size * 100).toFixed(1);
-        toast.success(`Video compressed! Saved ${savings}%`, { id: 'compress-video' });
+        toast.success(`Compressed! Saved ${savings}%`);
       } catch (error) {
         console.error('Compression failed:', error);
-        // Use original file if compression fails
         setVideoFile(file);
         const previewUrl = URL.createObjectURL(file);
         setVideoPreview(previewUrl);
-        toast.dismiss('compress-video');
       } finally {
-        setCompressing(false);
+        setStage('idle');
         setCompressionProgress(0);
       }
     } else {
@@ -123,44 +139,55 @@ const VideoPostForm = ({
       return;
     }
 
-    setLoading(true);
+    setStage('uploading');
     setUploadProgress(0);
+    uploadStartTime.current = Date.now();
+    lastBytesTransferred.current = 0;
 
     try {
-      // Upload video to Firebase Storage
-      toast.loading("Uploading video...", { id: 'upload-video' });
+      // Upload video to Firebase Storage with progress tracking
       const { videoUrl } = await uploadVideo(videoFile, user.uid, {
-        onProgress: (p) => setUploadProgress(p),
+        onProgress: (p, bytesTransferred) => {
+          setUploadProgress(p);
+          if (bytesTransferred) {
+            calculateUploadSpeed(bytesTransferred);
+          }
+        },
       });
 
       // Create video document in Firestore
-      const videoId = await createVideo({
+      setStage('creating');
+      await createVideo({
         userId: user.uid,
         title: formData.title,
         location: formData.location,
         videoUrl: videoUrl,
         description: formData.description || undefined,
-        role: (role === "agent" ? "agent" : "user") as "agent" | "user",
+        role: (role === "agent" || role === "admin" ? "agent" : "user") as "agent" | "user",
       });
 
-      toast.success("Video posted successfully!", { id: 'upload-video' });
-      setOpen(false);
+      setStage('complete');
+      toast.success("Video posted successfully!");
       
-      // Cleanup
-      handleRemoveVideo();
-      setFormData({
-        title: "",
-        location: "",
-        description: "",
-      });
-      
-      onSuccess?.();
+      // Small delay to show complete state
+      setTimeout(() => {
+        setOpen(false);
+        handleRemoveVideo();
+        setFormData({
+          title: "",
+          location: "",
+          description: "",
+        });
+        setStage('idle');
+        onSuccess?.();
+      }, 1000);
     } catch (error: any) {
       console.error("Error posting video:", error);
-      toast.error(error.message || "Failed to post video", { id: 'upload-video' });
+      toast.error(error.message || "Failed to post video");
+      setStage('idle');
     } finally {
-      setLoading(false);
       setUploadProgress(0);
+      setUploadSpeed('');
     }
   };
 
@@ -209,10 +236,10 @@ const VideoPostForm = ({
 
           <div className="space-y-2">
             <Label>Video File *</Label>
-            {compressing ? (
-              <div className="border-2 border-dashed border-semkat-orange/50 rounded-lg p-8 text-center">
-                <Zap className="h-12 w-12 text-semkat-orange mx-auto mb-2 animate-pulse" />
-                <span className="text-white/70">Compressing video...</span>
+            {stage === 'compressing' ? (
+              <div className="border-2 border-dashed border-semkat-orange/50 rounded-lg p-6 sm:p-8 text-center">
+                <Zap className="h-10 w-10 sm:h-12 sm:w-12 text-semkat-orange mx-auto mb-2 animate-pulse" />
+                <span className="text-white/70 text-sm sm:text-base">Compressing video...</span>
                 <div className="mt-3 space-y-2">
                   <div className="flex items-center justify-between text-xs text-white/60">
                     <span>Processing...</span>
@@ -222,7 +249,7 @@ const VideoPostForm = ({
                 </div>
               </div>
             ) : !videoFile ? (
-              <div className="border-2 border-dashed border-white/20 rounded-lg p-8 text-center hover:border-semkat-orange/50 transition-colors">
+              <div className="border-2 border-dashed border-white/20 rounded-lg p-6 sm:p-8 text-center hover:border-semkat-orange/50 transition-colors">
                 <input
                   ref={videoInputRef}
                   type="file"
@@ -235,9 +262,9 @@ const VideoPostForm = ({
                   htmlFor="video-upload"
                   className="cursor-pointer flex flex-col items-center gap-2"
                 >
-                  <Upload className="h-12 w-12 text-white/50" />
-                  <span className="text-white/70">Click to upload video</span>
-                  <span className="text-xs text-white/50">MP4, MOV, AVI (Max 100MB) - Large files auto-compressed</span>
+                  <Upload className="h-10 w-10 sm:h-12 sm:w-12 text-white/50" />
+                  <span className="text-white/70 text-sm sm:text-base">Click to upload video</span>
+                  <span className="text-[10px] sm:text-xs text-white/50">MP4, MOV, AVI (Max 200MB) - Auto-compressed</span>
                 </label>
               </div>
             ) : (
@@ -245,33 +272,55 @@ const VideoPostForm = ({
                 <video
                   src={videoPreview || undefined}
                   controls
-                  className="w-full max-h-64 rounded-lg bg-black/20"
+                  className="w-full max-h-48 sm:max-h-64 rounded-lg bg-black/20"
                 />
-                {loading && (
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-white/60">
-                      <span>Uploading...</span>
-                      <span>{Math.round(uploadProgress)}%</span>
-                    </div>
-                    <Progress value={uploadProgress} className="h-2 bg-white/10" />
+                
+                {/* Upload Progress Overlay */}
+                {(stage === 'uploading' || stage === 'creating' || stage === 'complete') && (
+                  <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center rounded-lg">
+                    {stage === 'complete' ? (
+                      <>
+                        <CheckCircle className="h-12 w-12 text-green-500 mb-2" />
+                        <span className="text-green-400 font-semibold">Video Posted!</span>
+                      </>
+                    ) : stage === 'creating' ? (
+                      <>
+                        <div className="w-10 h-10 border-4 border-semkat-orange border-t-transparent rounded-full animate-spin mb-2" />
+                        <span className="text-white/80 text-sm">Saving video...</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-full max-w-[200px] space-y-2">
+                          <div className="flex items-center justify-between text-xs text-white/80">
+                            <span>Uploading...</span>
+                            <span>{Math.round(uploadProgress)}%</span>
+                          </div>
+                          <Progress value={uploadProgress} className="h-3 bg-white/20" />
+                          {uploadSpeed && (
+                            <p className="text-center text-xs text-white/60">{uploadSpeed}</p>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
+                
                 <Button
                   type="button"
                   variant="destructive"
                   size="icon"
-                  className="absolute top-2 right-2"
+                  className="absolute top-2 right-2 h-8 w-8"
                   onClick={handleRemoveVideo}
-                  disabled={loading}
+                  disabled={stage !== 'idle'}
                 >
                   <X className="h-4 w-4" />
                 </Button>
-                <div className="text-xs text-white/50 mt-2 flex items-center gap-2">
-                  <span>File: {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                <div className="text-[10px] sm:text-xs text-white/50 mt-2 flex flex-wrap items-center gap-2">
+                  <span>{videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)</span>
                   {originalSize > videoFile.size && (
                     <span className="text-green-400 flex items-center gap-1">
                       <Zap className="h-3 w-3" />
-                      Compressed from {(originalSize / 1024 / 1024).toFixed(2)} MB
+                      Saved {((originalSize - videoFile.size) / 1024 / 1024).toFixed(1)} MB
                     </span>
                   )}
                 </div>
@@ -286,12 +335,20 @@ const VideoPostForm = ({
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="Describe your video..."
               rows={3}
-              className="bg-white/5 border-white/20"
+              className="bg-white/5 border-white/20 text-sm"
             />
           </div>
 
-          <Button type="submit" variant="hero" className="w-full" disabled={loading || !videoFile}>
-            {loading ? "Uploading..." : "Post Video"}
+          <Button 
+            type="submit" 
+            variant="hero" 
+            className="w-full" 
+            disabled={stage !== 'idle' || !videoFile}
+          >
+            {stage === 'uploading' ? `Uploading ${Math.round(uploadProgress)}%...` : 
+             stage === 'creating' ? 'Saving...' :
+             stage === 'complete' ? 'Done!' : 
+             'Post Video'}
           </Button>
         </form>
       </DialogContent>

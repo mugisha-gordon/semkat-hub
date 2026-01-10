@@ -8,7 +8,7 @@ export async function uploadVideo(
   file: File,
   userId: string,
   options?: {
-    onProgress?: (progress: number) => void;
+    onProgress?: (progress: number, bytesTransferred?: number) => void;
   }
 ): Promise<{ videoUrl: string; coverUrl?: string }> {
   // Validate file type
@@ -16,10 +16,10 @@ export async function uploadVideo(
     throw new Error('File must be a video');
   }
 
-  // Validate file size (max 100MB)
-  const maxSize = 100 * 1024 * 1024; // 100MB
+  // Validate file size (max 200MB - increased for better UX)
+  const maxSize = 200 * 1024 * 1024; // 200MB
   if (file.size > maxSize) {
-    throw new Error('Video file size must be less than 100MB');
+    throw new Error('Video file size must be less than 200MB');
   }
 
   // Generate unique filename
@@ -28,7 +28,7 @@ export async function uploadVideo(
   const videoRef = ref(storage, filename);
 
   try {
-    // Upload video
+    // Upload video with resumable upload for better reliability
     const uploadTask = uploadBytesResumable(videoRef, file, {
       contentType: file.type || 'video/mp4',
     });
@@ -40,13 +40,13 @@ export async function uploadVideo(
           const progress = snapshot.totalBytes
             ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
             : 0;
-          options?.onProgress?.(progress);
+          options?.onProgress?.(progress, snapshot.bytesTransferred);
         },
         (error) => {
           reject(error);
         },
         () => {
-          options?.onProgress?.(100);
+          options?.onProgress?.(100, file.size);
           resolve();
         }
       );
@@ -54,9 +54,6 @@ export async function uploadVideo(
 
     const videoUrl = await getDownloadURL(videoRef);
 
-    // Generate thumbnail from video (first frame) - simplified for now
-    // In production, you might want to use a service to extract thumbnails
-    // For now, we'll just return the video URL
     return { videoUrl };
   } catch (error: any) {
     console.error('Error uploading video:', error);
