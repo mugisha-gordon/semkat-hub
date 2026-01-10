@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ interface AgentStats {
 
 const AgentDashboard = () => {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<AgentStats>({
     totalListings: 0,
     activeListings: 0,
@@ -141,7 +143,7 @@ const AgentDashboard = () => {
             </div>
             <div className="flex gap-3">
               {user && <PropertyPostForm agentId={user.uid} onSuccess={refreshProperties} />}
-              {user && <VideoPostForm onSuccess={() => {}} />}
+              {user && <VideoPostForm onSuccess={() => navigate('/explore', { state: { fromUpload: true } })} />}
               <Button variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={signOut}>
                 Sign out
               </Button>

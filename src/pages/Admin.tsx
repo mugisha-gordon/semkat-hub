@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ interface AgentApplication {
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [applications, setApplications] = useState<AgentApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
@@ -217,7 +219,7 @@ const AdminDashboard = () => {
             </div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
               {user && <PropertyPostForm agentId={user.uid} onSuccess={() => {}} />}
-              {user && <VideoPostForm onSuccess={() => {}} />}
+              {user && <VideoPostForm onSuccess={() => navigate('/explore', { state: { fromUpload: true } })} />}
               <Dialog open={isRegisterOpen} onOpenChange={setIsRegisterOpen}>
                 <DialogTrigger asChild>
                   <Button variant="hero" className="gap-2 text-xs sm:text-sm">

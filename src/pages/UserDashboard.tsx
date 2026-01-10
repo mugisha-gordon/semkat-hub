@@ -16,11 +16,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getUserDocument } from "@/integrations/firebase/users";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import VideoPostForm from "@/components/video/VideoPostForm";
 
 const UserDashboard = () => {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<{ full_name: string | null }>({ full_name: null });
 
   useEffect(() => {
@@ -63,7 +64,7 @@ const UserDashboard = () => {
             </div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
               <VideoPostForm 
-                onSuccess={() => {}} 
+                onSuccess={() => navigate('/explore', { state: { fromUpload: true } })}
                 triggerLabel="Post Video"
                 triggerClassName="text-xs sm:text-sm"
               />
@@ -161,7 +162,7 @@ const UserDashboard = () => {
                 </div>
               </div>
               <VideoPostForm 
-                onSuccess={() => {}}
+                onSuccess={() => navigate('/explore', { state: { fromUpload: true } })}
                 triggerLabel="Post a Video"
                 triggerClassName="whitespace-nowrap"
               />
