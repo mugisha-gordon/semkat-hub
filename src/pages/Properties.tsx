@@ -103,6 +103,8 @@ const Properties = () => {
       location: prop.location,
       size: prop.size,
       images: prop.images,
+      illustration2D: prop.illustration2D,
+      illustration3D: prop.illustration3D,
       description: prop.description,
       features: prop.features,
       hasTitle: prop.hasTitle,

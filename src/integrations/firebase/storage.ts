@@ -34,25 +34,78 @@ export async function uploadVideo(
     });
 
     await new Promise<void>((resolve, reject) => {
+      let uploadCompleted = false;
+      
       uploadTask.on(
         'state_changed',
         (snapshot) => {
+          // Calculate progress
           const progress = snapshot.totalBytes
             ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
             : 0;
           options?.onProgress?.(progress, snapshot.bytesTransferred);
+          
+          // Check if upload is complete
+          if (snapshot.state === 'success') {
+            uploadCompleted = true;
+          }
         },
         (error) => {
+          // Handle upload errors
+          console.error('Upload error:', error);
+          uploadCompleted = false;
           reject(error);
         },
-        () => {
-          options?.onProgress?.(100, file.size);
-          resolve();
+        async () => {
+          // Upload completed successfully
+          try {
+            // Ensure progress is set to 100%
+            options?.onProgress?.(100, file.size);
+            
+            // Wait a moment to ensure upload is fully complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Verify upload task is complete
+            if (uploadTask.snapshot.state === 'success') {
+              uploadCompleted = true;
+              resolve();
+            } else {
+              throw new Error(`Upload state is ${uploadTask.snapshot.state}, expected 'success'`);
+            }
+          } catch (error: any) {
+            console.error('Error in upload completion:', error);
+            reject(error);
+          }
         }
       );
     });
 
-    const videoUrl = await getDownloadURL(videoRef);
+    // Get download URL after upload completes
+    // Add small delay to ensure upload is fully processed
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    let videoUrl: string | null = null;
+    let retries = 3;
+    
+    while (retries > 0) {
+      try {
+        videoUrl = await getDownloadURL(videoRef);
+        if (videoUrl && videoUrl.length > 0) {
+          break;
+        }
+      } catch (error: any) {
+        retries--;
+        if (retries === 0) {
+          throw new Error(`Failed to get video download URL after 3 attempts: ${error.message}`);
+        }
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    if (!videoUrl) {
+      throw new Error('Failed to get video download URL after upload');
+    }
 
     return { videoUrl };
   } catch (error: any) {

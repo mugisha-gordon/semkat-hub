@@ -23,7 +23,12 @@ const Auth = () => {
   const location = useLocation() as { state?: { from?: string } };
   const [pendingRedirect, setPendingRedirect] = useState(false);
 
-  const getRoleHome = (r: typeof role) => {
+  // Hard-coded admin email check
+  const ADMIN_EMAIL = "adminsemkat@gmail.com";
+
+  const getRoleHome = (r: typeof role, userEmail?: string | null) => {
+    // Direct email check for admin (most reliable)
+    if (userEmail === ADMIN_EMAIL) return '/admin';
     if (r === 'admin') return '/admin';
     if (r === 'agent') return '/agent-dashboard';
     return '/dashboard';
@@ -36,11 +41,27 @@ const Auth = () => {
     if (authLoading) return;
     if (!user) return;
 
-    const roleHome = getRoleHome(role);
+    // Check admin email directly for immediate redirect
+    const isAdminEmail = user.email === ADMIN_EMAIL;
+    const effectiveRole = isAdminEmail ? 'admin' : role;
+    
+    const roleHome = getRoleHome(effectiveRole, user.email);
     const safeFrom = from && from !== '/auth' ? from : null;
 
-    // Admins always go to /admin
-    const target = role === 'admin' ? '/admin' : safeFrom || roleHome;
+    // Determine redirect target
+    let target: string;
+    if (effectiveRole === 'admin' || isAdminEmail) {
+      // Admins always go to /admin
+      target = '/admin';
+    } else if (effectiveRole === 'agent') {
+      // Agents always go to /agent-dashboard
+      target = '/agent-dashboard';
+    } else {
+      // Regular users go to dashboard or safeFrom
+      target = safeFrom || roleHome;
+    }
+    
+    console.log('Redirecting:', { email: user.email, role, effectiveRole, target });
     navigate(target, { replace: true });
     setPendingRedirect(false);
   }, [pendingRedirect, authLoading, user, role, from, navigate]);
@@ -71,7 +92,8 @@ const Auth = () => {
       return;
     }
     toast.success("Account created successfully!");
-    navigate("/");
+    // Wait for auth state to update, then redirect to user dashboard
+    setPendingRedirect(true);
   };
 
   const handleGoogleLogin = async () => {

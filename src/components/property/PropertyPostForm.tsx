@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,10 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { createProperty } from "@/integrations/firebase/properties";
+import { uploadImage } from "@/integrations/firebase/storage";
 import type { PropertyType, PropertyStatus } from "@/types/property";
-import { Plus } from "lucide-react";
+import { Plus, Upload, X, Image, FileImage, Video } from "lucide-react";
 
 interface PropertyPostFormProps {
   agentId: string;
@@ -19,6 +21,15 @@ interface PropertyPostFormProps {
 const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [illustration2DFile, setIllustration2DFile] = useState<File | null>(null);
+  const [illustration2DPreview, setIllustration2DPreview] = useState<string | null>(null);
+  const [uploading2D, setUploading2D] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const illustration2DInputRef = useRef<HTMLInputElement>(null);
+  
   const [formData, setFormData] = useState({
     title: "",
     type: "residential" as PropertyType,
@@ -31,7 +42,9 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
     sizeValue: "",
     sizeUnit: "acres" as "acres" | "sqft" | "sqm" | "hectares",
     description: "",
-    images: "" as string, // Comma-separated URLs
+    images: "" as string, // Comma-separated URLs (can mix uploaded and manual URLs)
+    illustration2D: "", // URL for 2D floor plan
+    illustration3D: "", // URL for 3D virtual tour/panorama
     features: "" as string, // Comma-separated
     hasTitle: true,
     bedrooms: "",
@@ -43,19 +56,151 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
     installmentTerms: "",
   });
 
+  const handleImageUpload = async (files: FileList) => {
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      toast.error("Please select image files");
+      return;
+    }
+
+    // Validate file sizes
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const oversizedFiles = imageFiles.filter(file => file.size > maxSize);
+    if (oversizedFiles.length > 0) {
+      toast.error(`Some images exceed 10MB limit: ${oversizedFiles.map(f => f.name).join(', ')}`);
+      return;
+    }
+
+    setUploadingImages(true);
+    setUploadProgress(0);
+
+    try {
+      let uploadedCount = 0;
+      const urls: string[] = [];
+      
+      // Upload images one by one with progress tracking
+      for (let i = 0; i < imageFiles.length; i++) {
+        const file = imageFiles[i];
+        try {
+          const path = `properties/${agentId}/${Date.now()}_${i}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+          const url = await uploadImage(file, path);
+          urls.push(url);
+          uploadedCount++;
+          
+          // Update progress
+          const progress = ((i + 1) / imageFiles.length) * 100;
+          setUploadProgress(progress);
+        } catch (error: any) {
+          console.error(`Error uploading image ${file.name}:`, error);
+          toast.error(`Failed to upload ${file.name}: ${error.message || 'Unknown error'}`);
+        }
+      }
+
+      if (urls.length > 0) {
+        setUploadedImages(prev => [...prev, ...urls]);
+        
+        // Add uploaded URLs to form data (don't overwrite manual URLs)
+        const existingUrls = formData.images 
+          .split(",")
+          .map(u => u.trim())
+          .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')));
+        
+        setFormData(prev => ({
+          ...prev,
+          images: [...existingUrls, ...urls].join(", ")
+        }));
+        
+        toast.success(`${urls.length} image(s) uploaded successfully`);
+      } else {
+        toast.error("No images were uploaded. Please try again.");
+      }
+    } catch (error: any) {
+      console.error("Error uploading images:", error);
+      let message = error.message || "Failed to upload images";
+      if (error?.code === 'storage/unauthorized') {
+        message = "You don't have permission to upload images. Please check your account.";
+      } else if (error?.code === 'storage/quota-exceeded') {
+        message = "Storage quota exceeded. Please contact support.";
+      }
+      toast.error(message);
+    } finally {
+      setUploadingImages(false);
+      setUploadProgress(0);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setUploadedImages(prev => {
+      const newImages = prev.filter((_, i) => i !== index);
+      // Also update form data to remove from combined list
+      const allImages = formData.images.split(",").map(u => u.trim()).filter(u => u);
+      const toRemove = prev[index];
+      const updatedImages = allImages.filter(img => img !== toRemove);
+      setFormData(prevData => ({ ...prevData, images: updatedImages.join(", ") }));
+      return newImages;
+    });
+  };
+
+  const handle2DIllustrationUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error("Please select an image file for 2D illustration");
+      return;
+    }
+
+    setUploading2D(true);
+    try {
+      const path = `properties/${agentId}/2d_${Date.now()}_${file.name}`;
+      const url = await uploadImage(file, path);
+      setFormData(prev => ({ ...prev, illustration2D: url }));
+      toast.success("2D illustration uploaded successfully");
+    } catch (error: any) {
+      console.error("Error uploading 2D illustration:", error);
+      toast.error(error.message || "Failed to upload 2D illustration");
+    } finally {
+      setUploading2D(false);
+      setIllustration2DFile(null);
+      if (illustration2DPreview) {
+        URL.revokeObjectURL(illustration2DPreview);
+        setIllustration2DPreview(null);
+      }
+    }
+  };
+
+  const handle2DFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIllustration2DFile(file);
+    const preview = URL.createObjectURL(file);
+    setIllustration2DPreview(preview);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Parse images
-      const images = formData.images
+      // Upload 2D illustration if file selected
+      if (illustration2DFile && !formData.illustration2D) {
+        await handle2DIllustrationUpload(illustration2DFile);
+      }
+
+      // Combine uploaded images with manually entered URLs
+      const uploadedUrls = uploadedImages;
+      // Parse manual URLs (those that start with http/https)
+      const manualUrls = formData.images
         .split(",")
         .map((url) => url.trim())
-        .filter((url) => url.length > 0);
+        .filter((url) => url.length > 0 && (url.startsWith('http://') || url.startsWith('https://')));
 
-      if (images.length === 0) {
-        toast.error("Please provide at least one image URL");
+      // Combine both, removing duplicates
+      const allImages = [
+        ...uploadedUrls,
+        ...manualUrls.filter(url => !uploadedUrls.includes(url))
+      ];
+
+      if (allImages.length === 0) {
+        toast.error("Please provide at least one image (upload files or enter image URLs)");
         setLoading(false);
         return;
       }
@@ -101,7 +246,9 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
           value: parseFloat(formData.sizeValue),
           unit: formData.sizeUnit,
         },
-        images,
+        images: allImages,
+        illustration2D: formData.illustration2D || undefined,
+        illustration3D: formData.illustration3D || undefined,
         description: formData.description,
         features,
         hasTitle: formData.hasTitle,
@@ -127,6 +274,8 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
         sizeUnit: "acres",
         description: "",
         images: "",
+        illustration2D: "",
+        illustration3D: "",
         features: "",
         hasTitle: true,
         bedrooms: "",
@@ -137,6 +286,14 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
         numberOfInstallments: "",
         installmentTerms: "",
       });
+      setUploadedImages([]);
+      setIllustration2DFile(null);
+      if (illustration2DPreview) {
+        URL.revokeObjectURL(illustration2DPreview);
+        setIllustration2DPreview(null);
+      }
+      if (imageInputRef.current) imageInputRef.current.value = '';
+      if (illustration2DInputRef.current) illustration2DInputRef.current.value = '';
       onSuccess?.();
     } catch (error: any) {
       console.error("Error posting property:", error);
@@ -361,16 +518,120 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
             />
           </div>
 
+          {/* Image Upload Section */}
+          <div className="space-y-4">
+            <Label>Property Images *</Label>
+            
+            {/* Upload Images */}
+            <div className="border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-semkat-orange/50 transition-colors">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
+                className="hidden"
+                id="property-images"
+                disabled={uploadingImages}
+              />
+              <label
+                htmlFor="property-images"
+                className="cursor-pointer flex flex-col items-center gap-2"
+              >
+                <Upload className="h-8 w-8 text-white/50" />
+                <span className="text-white/70 text-sm">
+                  {uploadingImages ? "Uploading..." : "Click to upload images"}
+                </span>
+                <span className="text-xs text-white/50">JPG, PNG, WebP (Max 10MB each)</span>
+              </label>
+              {uploadingImages && (
+                <div className="mt-4 space-y-2">
+                  <Progress value={uploadProgress} className="h-2" />
+                </div>
+              )}
+            </div>
+
+            {/* Uploaded Images Preview */}
+            {uploadedImages.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">
+                {uploadedImages.map((url, index) => (
+                  <div key={index} className="relative group">
+                    <img src={url} alt={`Uploaded ${index + 1}`} className="w-full h-24 object-cover rounded-lg" />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => handleRemoveImage(index)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Manual Image URLs (optional) */}
+            <div className="space-y-2">
+              <Label>Or add image URLs manually (comma-separated)</Label>
+              <Input
+                value={formData.images}
+                onChange={(e) => setFormData({ ...formData, images: e.target.value })}
+                placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
+                className="bg-white/5 border-white/20"
+              />
+              <p className="text-xs text-white/50">Enter image URLs separated by commas (optional if uploading files)</p>
+            </div>
+          </div>
+
+          {/* 2D Illustration (Floor Plan) */}
           <div className="space-y-2">
-            <Label>Image URLs (comma-separated) *</Label>
+            <Label>2D Illustration (Floor Plan/Diagram)</Label>
+            <div className="flex gap-2">
+              <div className="flex-1 border-2 border-dashed border-white/20 rounded-lg p-4 text-center hover:border-semkat-orange/50 transition-colors">
+                <input
+                  ref={illustration2DInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handle2DFileSelect}
+                  className="hidden"
+                  id="illustration-2d"
+                  disabled={uploading2D}
+                />
+                <label
+                  htmlFor="illustration-2d"
+                  className="cursor-pointer flex flex-col items-center gap-2"
+                >
+                  <FileImage className="h-6 w-6 text-white/50" />
+                  <span className="text-white/70 text-xs">
+                    {uploading2D ? "Uploading..." : illustration2DPreview ? "Change 2D illustration" : "Upload floor plan"}
+                  </span>
+                </label>
+              </div>
+              {illustration2DPreview && (
+                <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-white/20">
+                  <img src={illustration2DPreview} alt="2D preview" className="w-full h-full object-cover" />
+                </div>
+              )}
+              {formData.illustration2D && !illustration2DPreview && (
+                <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-white/20">
+                  <img src={formData.illustration2D} alt="2D illustration" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-white/50">Upload a floor plan, diagram, or 2D layout (JPG, PNG, WebP)</p>
+          </div>
+
+          {/* 3D Illustration (Virtual Tour URL) */}
+          <div className="space-y-2">
+            <Label>3D Illustration (Virtual Tour/Panorama URL)</Label>
             <Input
-              value={formData.images}
-              onChange={(e) => setFormData({ ...formData, images: e.target.value })}
-              placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
-              required
+              value={formData.illustration3D}
+              onChange={(e) => setFormData({ ...formData, illustration3D: e.target.value })}
+              placeholder="https://example.com/3d-tour or https://example.com/panorama.jpg"
               className="bg-white/5 border-white/20"
             />
-            <p className="text-xs text-white/50">Enter image URLs separated by commas</p>
+            <p className="text-xs text-white/50">Enter URL for 3D virtual tour or 360° panorama image</p>
           </div>
 
           <div className="space-y-2">

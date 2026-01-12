@@ -148,18 +148,32 @@ export async function getVideo(videoId: string): Promise<VideoDocument | null> {
  * Create a new video (agent or user)
  */
 export async function createVideo(data: CreateVideoDocument): Promise<string> {
-  const videosRef = collection(db, COLLECTION_NAME);
-  const videoData = {
-    ...data,
-    likes: 0,
-    comments: 0,
-    likedBy: [],
-    createdAt: Timestamp.now(),
-    updatedAt: Timestamp.now(),
-  };
+  // Validate required fields
+  if (!data.userId || !data.title || !data.location || !data.videoUrl) {
+    throw new Error('Missing required fields: userId, title, location, and videoUrl are required');
+  }
 
-  const docRef = await addDoc(videosRef, videoData);
-  return docRef.id;
+  if (!data.role || (data.role !== 'agent' && data.role !== 'user')) {
+    throw new Error('Invalid role: must be "agent" or "user"');
+  }
+
+  try {
+    const videosRef = collection(db, COLLECTION_NAME);
+    const videoData = {
+      ...data,
+      likes: 0,
+      comments: 0,
+      likedBy: [],
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    };
+
+    const docRef = await addDoc(videosRef, videoData);
+    return docRef.id;
+  } catch (error: any) {
+    console.error('Error creating video document:', error);
+    throw new Error(`Failed to create video: ${error.message || 'Unknown error'}`);
+  }
 }
 
 /**

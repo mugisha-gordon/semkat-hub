@@ -3,6 +3,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Hard-coded bootstrap admin email (for initial admin access)
+    function isBootstrapAdmin() {
+      return request.auth != null &&
+             request.auth.token.email != null &&
+             request.auth.token.email == 'adminsemkat@gmail.com';
+    }
+    
     // Helper function to check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
@@ -15,9 +22,10 @@ service cloud.firestore {
     
     // Helper function to check if user is admin
     function isAdmin() {
-      return isAuthenticated() && 
+      return (isBootstrapAdmin()) ||
+             (isAuthenticated() && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             getUserData().role == 'admin';
+             getUserData().role == 'admin');
     }
     
     // Helper function to check if user is owner or admin
@@ -39,15 +47,17 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       
       // Users can update their own document
-      allow update: if isOwnerOrAdmin(userId) &&
+      allow update: if (isBootstrapAdmin()) ||
+                      (isOwnerOrAdmin(userId) &&
                       // Prevent role escalation (only admins can change roles)
-                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile', 'updatedAt']) || isAdmin());
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile', 'updatedAt']) || isAdmin()));
       
       // Users can create their own document (on signup)
-      allow create: if isAuthenticated() && 
+      allow create: if (isBootstrapAdmin()) ||
+                      (isAuthenticated() && 
                       request.auth.uid == userId &&
                       request.resource.data.userId == userId &&
-                      request.resource.data.role == 'user';
+                      request.resource.data.role == 'user');
       
       // Only admins can delete users
       allow delete: if isAdmin();
@@ -75,12 +85,12 @@ service cloud.firestore {
       // Everyone can read properties
       allow read: if true;
       
-      // Only agents can create properties
+      // Agents and admins can create properties
       allow create: if isAuthenticated() && 
-                      hasRole('agent') &&
+                      (hasRole('agent') || isAdmin()) &&
                       request.resource.data.agentId == request.auth.uid;
       
-      // Only the agent who owns it or admin can update/delete
+      // Only the agent/admin who owns it or admin can update/delete
       allow update, delete: if isAuthenticated() && 
                               (resource.data.agentId == request.auth.uid || isAdmin());
     }

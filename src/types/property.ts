@@ -20,6 +20,8 @@ export interface Property {
     unit: 'acres' | 'sqft' | 'sqm' | 'hectares';
   };
   images: string[];
+  illustration2D?: string; // URL for 2D floor plan/diagram
+  illustration3D?: string; // URL for 3D virtual tour/panorama
   description: string;
   features: string[];
   hasTitle: boolean;

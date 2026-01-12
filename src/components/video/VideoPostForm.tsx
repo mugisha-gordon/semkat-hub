@@ -170,27 +170,42 @@ const VideoPostForm = ({
       toast.success("Video posted successfully!");
       
       // Small delay to show complete state
-      setTimeout(() => {
-        setOpen(false);
-        handleRemoveVideo();
-        setFormData({
-          title: "",
-          location: "",
-          description: "",
-        });
-        setStage('idle');
-        onSuccess?.();
-      }, 1000);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      setOpen(false);
+      handleRemoveVideo();
+      setFormData({
+        title: "",
+        location: "",
+        description: "",
+      });
+      setStage('idle');
+      setUploadProgress(0);
+      setUploadSpeed('');
+      onSuccess?.();
     } catch (error: any) {
       console.error("Error posting video:", error);
       const code = error?.code ? ` (${error.code})` : "";
-      const message = error?.message || "Failed to post video";
-      // Common Firebase errors: storage/unauthorized, permission-denied
+      let message = error?.message || "Failed to post video";
+      
+      // Provide user-friendly error messages
+      if (error?.code === 'storage/unauthorized') {
+        message = "You don't have permission to upload videos. Please check your account.";
+      } else if (error?.code === 'storage/quota-exceeded') {
+        message = "Storage quota exceeded. Please contact support.";
+      } else if (error?.code === 'storage/canceled') {
+        message = "Upload was canceled. Please try again.";
+      } else if (message.includes('network') || message.includes('Network')) {
+        message = "Network error. Please check your connection and try again.";
+      }
+      
       toast.error(`${message}${code}`);
       setStage('idle');
-    } finally {
       setUploadProgress(0);
       setUploadSpeed('');
+      
+      // Keep the file and preview for retry if upload failed
+      // Don't remove video file so user can retry
     }
   };
 

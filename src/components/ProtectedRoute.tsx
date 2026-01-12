@@ -10,6 +10,11 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
   const { user, loading, role } = useAuth();
   const location = useLocation();
 
+  // Hard-coded admin email check
+  const ADMIN_EMAIL = "adminsemkat@gmail.com";
+  const isAdminEmail = user?.email === ADMIN_EMAIL;
+  const effectiveRole = isAdminEmail ? 'admin' : role;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
@@ -28,15 +33,15 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
   // If a specific role is required, check for it
   // Admin can access everything (including agent dashboard)
   if (requireRole) {
-    if (role === 'admin') {
+    if (effectiveRole === 'admin' || isAdminEmail) {
       return <>{children}</>;
     }
     // Agents can access agent routes
-    if (requireRole === 'agent' && role === 'agent') {
+    if (requireRole === 'agent' && effectiveRole === 'agent') {
       return <>{children}</>;
     }
     // If role doesn't match, redirect
-    if (role !== requireRole) {
+    if (effectiveRole !== requireRole) {
       return <Navigate to="/" replace />;
     }
   }

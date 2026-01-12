@@ -52,6 +52,15 @@ const PropertyDetailModal = ({ property, open, onClose }: PropertyDetailModalPro
                 <Eye className="h-4 w-4" />
                 Photos
               </TabsTrigger>
+              {property.illustration2D && (
+                <TabsTrigger 
+                  value="floor-plan"
+                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+                >
+                  <FileCheck className="h-4 w-4" />
+                  2D Floor Plan
+                </TabsTrigger>
+              )}
               {supportsVirtualTour && (
                 <TabsTrigger 
                   value="virtual-tour"
@@ -134,19 +143,60 @@ const PropertyDetailModal = ({ property, open, onClose }: PropertyDetailModalPro
           </div>
         )}
 
+        {/* 2D Floor Plan Tab */}
+        {activeTab === 'floor-plan' && property.illustration2D && (
+          <div className="p-4">
+            <div className="relative aspect-video rounded-xl overflow-hidden border border-border bg-muted">
+              <img 
+                src={property.illustration2D} 
+                alt="2D Floor Plan" 
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground text-center mt-4">
+              2D Floor Plan / Diagram
+            </p>
+          </div>
+        )}
+
         {/* Virtual Tour Tab */}
         {activeTab === 'virtual-tour' && supportsVirtualTour && (
           <div className="p-4">
-            <Suspense fallback={
-              <div className="h-[400px] rounded-xl bg-muted animate-pulse flex items-center justify-center">
-                <div className="text-center">
-                  <Move3D className="h-12 w-12 text-muted-foreground mx-auto mb-3 animate-spin" />
-                  <p className="text-muted-foreground">Loading 3D Experience...</p>
+            {/* If 3D illustration URL is provided, use it directly */}
+            {property.illustration3D ? (
+              <div className="space-y-4">
+                <div className="relative aspect-video rounded-xl overflow-hidden border border-border">
+                  {property.illustration3D.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                    <img 
+                      src={property.illustration3D} 
+                      alt="3D Panorama" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <iframe 
+                      src={property.illustration3D} 
+                      className="w-full h-full border-0"
+                      title="3D Virtual Tour"
+                      allowFullScreen
+                    />
+                  )}
                 </div>
+                <p className="text-sm text-muted-foreground text-center">
+                  3D Virtual Tour / Panorama View
+                </p>
               </div>
-            }>
-              <PropertyVisualization property={property} />
-            </Suspense>
+            ) : (
+              <Suspense fallback={
+                <div className="h-[400px] rounded-xl bg-muted animate-pulse flex items-center justify-center">
+                  <div className="text-center">
+                    <Move3D className="h-12 w-12 text-muted-foreground mx-auto mb-3 animate-spin" />
+                    <p className="text-muted-foreground">Loading 3D Experience...</p>
+                  </div>
+                </div>
+              }>
+                <PropertyVisualization property={property} />
+              </Suspense>
+            )}
           </div>
         )}
 

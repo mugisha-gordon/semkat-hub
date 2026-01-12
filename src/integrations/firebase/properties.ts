@@ -19,7 +19,7 @@ import type { PropertyType, PropertyStatus } from '@/types/property';
 
 export interface PropertyDocument {
   id: string;
-  agentId: string; // Firebase Auth UID of the agent
+  agentId: string; // Firebase Auth UID of the agent (or admin)
   title: string;
   type: PropertyType;
   status: PropertyStatus;
@@ -36,6 +36,8 @@ export interface PropertyDocument {
     unit: 'acres' | 'sqft' | 'sqm' | 'hectares';
   };
   images: string[];
+  illustration2D?: string; // URL for 2D floor plan/diagram
+  illustration3D?: string; // URL for 3D virtual tour/panorama
   description: string;
   features: string[];
   hasTitle: boolean;
@@ -71,6 +73,8 @@ export interface CreatePropertyDocument {
     unit: 'acres' | 'sqft' | 'sqm' | 'hectares';
   };
   images: string[];
+  illustration2D?: string; // URL for 2D floor plan/diagram
+  illustration3D?: string; // URL for 3D virtual tour/panorama
   description: string;
   features: string[];
   hasTitle: boolean;
@@ -189,13 +193,24 @@ export async function getProperty(propertyId: string): Promise<PropertyDocument 
  */
 export async function createProperty(data: CreatePropertyDocument): Promise<string> {
   const propertiesRef = collection(db, COLLECTION_NAME);
-  const propertyData = {
+  // Remove undefined optional fields to avoid Firestore errors
+  const sanitized: any = {
     ...data,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };
 
-  const docRef = await addDoc(propertiesRef, propertyData);
+  if (sanitized.illustration2D === undefined) {
+    delete sanitized.illustration2D;
+  }
+  if (sanitized.illustration3D === undefined) {
+    delete sanitized.illustration3D;
+  }
+  if (sanitized.installmentPayment === undefined) {
+    delete sanitized.installmentPayment;
+  }
+
+  const docRef = await addDoc(propertiesRef, sanitized);
   return docRef.id;
 }
 

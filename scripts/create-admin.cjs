@@ -27,8 +27,8 @@ admin.initializeApp({
 const db = admin.firestore();
 
 async function createAdmin() {
-  const email = 'gordonmigisha@gmail.com';
-  const password = 'Rukundo@2014';
+  const email = 'adminsemkat@gmail.com';
+  const password = 'admin@semkat';
   const fullName = 'Administrator';
 
   try {

@@ -213,8 +213,12 @@ const AdminDashboard = () => {
         <div className="container space-y-6 sm:space-y-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <p className="text-white/70 text-xs sm:text-sm">Admin Control</p>
-              <h1 className="font-heading text-xl sm:text-3xl font-bold">Semkat Command Center</h1>
+              <p className="text-white/70 text-xs sm:text-sm">
+                {user?.email === "adminsemkat@gmail.com" ? "Welcome admin" : "Admin Control"}
+              </p>
+              <h1 className="font-heading text-xl sm:text-3xl font-bold">
+                {user?.email === "adminsemkat@gmail.com" ? "Admin Dashboard" : "Semkat Command Center"}
+              </h1>
               <p className="text-white/60 text-xs sm:text-sm mt-1">Signed in as {user?.email}</p>
             </div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
