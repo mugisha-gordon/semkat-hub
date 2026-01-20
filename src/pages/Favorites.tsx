@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import PropertyCard from "@/components/property/PropertyCard";
@@ -6,12 +6,32 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Heart, Sparkles, LogIn } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { subscribeToFavoriteProperties, type FavoritePropertyDocument } from "@/integrations/firebase/favorites";
 
 const Favorites = () => {
   const { user, loading } = useAuth();
-  
-  // Placeholder: using featured properties until persistence is wired.
-  const favoriteProperties = useMemo(() => [], []);
+
+  const [favoriteDocs, setFavoriteDocs] = useState<FavoritePropertyDocument[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setFavoriteDocs([]);
+      return;
+    }
+
+    setFavoritesLoading(true);
+    const unsub = subscribeToFavoriteProperties(user.uid, (items) => {
+      setFavoriteDocs(items);
+      setFavoritesLoading(false);
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [user]);
+
+  const favoriteProperties = useMemo(() => favoriteDocs.map((d) => d.property), [favoriteDocs]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -42,7 +62,7 @@ const Favorites = () => {
               <p className="text-muted-foreground max-w-lg mx-auto">
                 Create an account or sign in to save properties and access them from any device.
               </p>
-              <div className="flex justify-center gap-3">
+              <div className="flex flex-col sm:flex-row justify-center gap-3">
                 <Button variant="hero" asChild>
                   <Link to="/auth">Sign In</Link>
                 </Button>
@@ -50,6 +70,11 @@ const Favorites = () => {
                   <Link to="/properties">Browse Properties</Link>
                 </Button>
               </div>
+            </Card>
+          ) : favoritesLoading ? (
+            <Card className="bg-card border p-10 text-center space-y-4">
+              <div className="mx-auto w-12 h-12 border-4 border-semkat-orange border-t-transparent rounded-full animate-spin" />
+              <p className="text-muted-foreground">Loading favorites...</p>
             </Card>
           ) : favoriteProperties.length > 0 ? (
             <>
@@ -60,16 +85,16 @@ const Favorites = () => {
                     className="animate-fade-in"
                     style={{ animationDelay: `${index * 0.05}s` }}
                   >
-                    <PropertyCard property={property} />
+                    <PropertyCard property={property} isFavorite />
                   </div>
                 ))}
               </div>
-              <Card className="bg-card border p-6 flex items-center justify-between">
-                <div>
+              <Card className="bg-card border p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="min-w-0">
                   <h3 className="font-heading text-xl font-semibold text-foreground">Get alerts when similar properties appear</h3>
                   <p className="text-muted-foreground text-sm">Save a search to receive instant notifications.</p>
                 </div>
-                <Button variant="hero">Create saved search</Button>
+                <Button variant="hero" className="sm:shrink-0">Create saved search</Button>
               </Card>
             </>
           ) : (
@@ -81,7 +106,7 @@ const Favorites = () => {
               <p className="text-muted-foreground max-w-lg mx-auto">
                 Tap the heart icon on any property to keep it here.
               </p>
-              <div className="flex justify-center gap-3">
+              <div className="flex flex-col sm:flex-row justify-center gap-3">
                 <Button variant="hero" asChild>
                   <Link to="/properties">Browse properties</Link>
                 </Button>

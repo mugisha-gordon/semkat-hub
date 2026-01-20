@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1080076065610",
+    "project_id": "semkat-hub",
+    "storage_bucket": "semkat-hub.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1080076065610:android:483fba50913d68e2a3bfb3",
+        "android_client_info": {
+          "package_name": "com.semkat.semkathub"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1080076065610-e53frmoblcmh4ds0fs9l07jd3thmdqpm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDN7kOwG33WsmMaQoC3HHxn1daRxigtXQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1080076065610-e53frmoblcmh4ds0fs9l07jd3thmdqpm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

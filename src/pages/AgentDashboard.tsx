@@ -16,11 +16,12 @@ import {
   CheckCircle
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { getUserDocument } from "@/integrations/firebase/users";
+import { getUserDocument, subscribeToUserDocument } from "@/integrations/firebase/users";
 import PropertyPostForm from "@/components/property/PropertyPostForm";
 import VideoPostForm from "@/components/video/VideoPostForm";
-import { getAgentPropertyCounts, getProperties, updateProperty } from "@/integrations/firebase/properties";
+import { getAgentPropertyCounts, getProperties, subscribeToProperties, updateProperty } from "@/integrations/firebase/properties";
 import type { PropertyDocument } from "@/integrations/firebase/properties";
+import { subscribeToConversations } from "@/integrations/firebase/messages";
 import { toast } from "sonner";
 
 interface AgentStats {
@@ -43,54 +44,65 @@ const AgentDashboard = () => {
   const [properties, setProperties] = useState<PropertyDocument[]>([]);
   const [propertiesLoading, setPropertiesLoading] = useState(true);
   const [updatingPropertyId, setUpdatingPropertyId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      if (!user) return;
-      try {
-        const [userDoc, counts, latestProperties] = await Promise.all([
-          getUserDocument(user.uid),
-          getAgentPropertyCounts(user.uid),
-          getProperties({ agentId: user.uid, limit: 12 }),
-        ]);
+    if (!user) return;
 
-        if (userDoc?.profile) {
-          setProfile({ full_name: userDoc.profile.fullName });
-        }
+    setPropertiesLoading(true);
 
-        setProperties(latestProperties);
-
-        setStats({
-          totalListings: counts.totalListings,
-          activeListings: counts.activeListings,
-          totalViews: 0, // TODO: Implement view tracking
-          inquiries: 0, // TODO: Implement inquiry tracking
-        });
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      } finally {
-        setPropertiesLoading(false);
+    // Subscribe to agent profile
+    const unsubProfile = subscribeToUserDocument(user.uid, (doc) => {
+      if (doc?.profile) {
+        setProfile({ full_name: doc.profile.fullName });
       }
+    });
+
+    // Subscribe to properties in real-time
+    const unsubProps = subscribeToProperties({ agentId: user.uid, limit: 50 }, (props) => {
+      setProperties(props);
+      // Update stats derived from properties
+      const total = props.length;
+      const active = props.filter((p) => p.status === 'available').length;
+      setStats((prev) => ({
+        ...prev,
+        totalListings: total,
+        activeListings: active,
+      }));
+      setPropertiesLoading(false);
+    });
+
+    // Subscribe to conversations (inquiries) for this agent
+    const unsubConvos = subscribeToConversations(user.uid, (convos) => {
+      setConversations(convos);
+      const inquiries = convos.reduce((acc, c) => {
+        const unread = c.unreadCount?.[user.uid] || 0;
+        return acc + (unread > 0 ? 1 : 0);
+      }, 0);
+      setStats((prev) => ({
+        ...prev,
+        inquiries,
+      }));
+    });
+
+    return () => {
+      try { unsubProps(); } catch {}
+      try { unsubConvos(); } catch {}
+      try { unsubProfile(); } catch {}
     };
-    fetchData();
   }, [user]);
 
   const refreshProperties = async () => {
     if (!user) return;
     setPropertiesLoading(true);
     try {
-      const [counts, agentProperties] = await Promise.all([
-        getAgentPropertyCounts(user.uid),
-        getProperties({ agentId: user.uid, limit: 12 }),
-      ]);
-
+      const agentProperties = await getProperties({ agentId: user.uid, limit: 12 });
       setProperties(agentProperties);
-      setStats({
-        totalListings: counts.totalListings,
-        activeListings: counts.activeListings,
-        totalViews: stats.totalViews,
-        inquiries: stats.inquiries,
-      });
+      setStats((prev) => ({
+        ...prev,
+        totalListings: agentProperties.length,
+        activeListings: agentProperties.filter((p) => p.status === 'available').length,
+      }));
     } catch (error) {
       console.error('Error fetching properties:', error);
     } finally {
@@ -133,7 +145,7 @@ const AgentDashboard = () => {
       <main className="flex-1 py-8">
         <div className="container space-y-8">
           {/* Welcome Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <p className="text-semkat-sky text-sm font-medium">Agent Portal</p>
               <h1 className="font-heading text-3xl font-bold">
@@ -141,9 +153,18 @@ const AgentDashboard = () => {
               </h1>
               <p className="text-white/60 text-sm mt-1">{user?.email}</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               {user && <PropertyPostForm agentId={user.uid} onSuccess={refreshProperties} />}
-              {user && <VideoPostForm onSuccess={() => navigate('/explore', { state: { fromUpload: true } })} />}
+              {user && (
+                <VideoPostForm 
+                  onSuccess={() => {
+                    // Navigate to Explore after successful upload
+                    setTimeout(() => {
+                      navigate('/explore', { state: { fromUpload: true } });
+                    }, 500);
+                  }} 
+                />
+              )}
               <Button variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={signOut}>
                 Sign out
               </Button>
@@ -204,7 +225,7 @@ const AgentDashboard = () => {
           {/* Main Content Tabs */}
           <Card className="bg-white/5 border-white/10 text-white p-6">
             <Tabs defaultValue="listings" className="w-full">
-              <TabsList className="bg-white/5 border-white/10">
+              <TabsList className="bg-white/5 border-white/10 flex flex-wrap h-auto">
                 <TabsTrigger value="listings" className="data-[state=active]:bg-semkat-orange">
                   <Building className="h-4 w-4 mr-2" />
                   My Listings
@@ -231,13 +252,13 @@ const AgentDashboard = () => {
                 ) : (
                   <div className="space-y-4">
                     {properties.map((property) => (
-                      <div key={property.id} className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10">
-                        <div className="flex-1">
+                      <div key={property.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg bg-white/5 border border-white/10">
+                        <div className="flex-1 min-w-0">
                           <h4 className="font-semibold">{property.title}</h4>
                           <p className="text-white/60 text-sm">{property.currency} {property.price.toLocaleString()}</p>
                           <p className="text-white/50 text-xs mt-1">{property.location.district}, {property.location.region}</p>
                         </div>
-                        <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap items-center gap-3 sm:justify-end">
                           <Badge className={
                             property.status === 'available' ? 'bg-green-500/20 text-green-400' : 
                             property.status === 'sold' ? 'bg-red-500/20 text-red-400' :
@@ -268,32 +289,36 @@ const AgentDashboard = () => {
 
               <TabsContent value="inquiries" className="mt-6">
                 <div className="space-y-4">
-                  {[
-                    { name: 'John Mukasa', property: '3 Bedroom Villa in Kololo', time: '2 hours ago' },
-                    { name: 'Sarah Nambi', property: 'Commercial Space - Kampala Road', time: '5 hours ago' },
-                    { name: 'David Ochen', property: '5 Acre Land in Wakiso', time: '1 day ago' },
-                  ].map((inquiry, i) => (
-                    <div key={i} className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-semkat-orange/20 flex items-center justify-center">
-                          <Users className="h-5 w-5 text-semkat-orange" />
+                  {conversations.length === 0 ? (
+                    <p className="text-white/60 text-center py-8">No inquiries yet</p>
+                  ) : (
+                    conversations.map((c) => {
+                      const otherId = c.participantIds.find((id: string) => id !== user?.uid);
+                      const unread = c.unreadCount?.[user?.uid] || 0;
+                      return (
+                        <div key={c.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-semkat-orange/20 flex items-center justify-center">
+                              <Users className="h-5 w-5 text-semkat-orange" />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-semibold">Conversation with {otherId}</h4>
+                              <p className="text-white/60 text-sm truncate">Last message: {c.lastMessage}</p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+                            <span className="flex items-center gap-1 text-white/50 text-sm">
+                              <Clock className="h-4 w-4" />
+                              {c.lastMessageAt?.toDate?.().toLocaleString?.() || ""}
+                            </span>
+                            <Button size="sm" variant={unread > 0 ? "hero" : "outline"}>
+                              {unread > 0 ? `Reply (${unread})` : "Open"}
+                            </Button>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-semibold">{inquiry.name}</h4>
-                          <p className="text-white/60 text-sm">Interested in: {inquiry.property}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1 text-white/50 text-sm">
-                          <Clock className="h-4 w-4" />
-                          {inquiry.time}
-                        </span>
-                        <Button size="sm" variant="hero">
-                          Reply
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })
+                  )}
                 </div>
               </TabsContent>
 

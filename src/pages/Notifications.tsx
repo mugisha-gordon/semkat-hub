@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Bell, CheckCircle2, AlertTriangle, Home, FileText, LogIn } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
-  getNotificationsForUser,
+  subscribeToNotificationsForUser,
   markNotificationAsRead,
   type NotificationDocument,
   type NotificationType,
@@ -41,18 +41,23 @@ const Notifications = () => {
     }
 
     setItemsLoading(true);
-    getNotificationsForUser(user.uid, { limit: 50 })
-      .then(setItems)
-      .catch((e) => {
-        console.error("Error loading notifications", e);
-      })
-      .finally(() => setItemsLoading(false));
+    const unsub = subscribeToNotificationsForUser(
+      user.uid,
+      (next) => {
+        setItems(next);
+        setItemsLoading(false);
+      },
+      { limit: 50 }
+    );
+
+    return () => {
+      unsub();
+    };
   }, [user]);
 
   const handleMarkRead = async (id: string) => {
     try {
       await markNotificationAsRead(id);
-      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: n.readAt ?? (n as any).readAt } : n)));
     } catch (e) {
       console.error("Error marking notification as read", e);
     }
@@ -127,8 +132,8 @@ const Notifications = () => {
                       <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 border border-border">
                         <Icon className="h-5 w-5 text-foreground" />
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Link to={`/notifications/${item.id}`} className="font-semibold text-foreground hover:underline">
                             {item.title}
                           </Link>
@@ -146,7 +151,7 @@ const Notifications = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-muted-foreground hover:text-foreground"
+                        className="text-muted-foreground hover:text-foreground shrink-0"
                         onClick={() => handleMarkRead(item.id)}
                         disabled={isRead}
                       >
@@ -159,12 +164,12 @@ const Notifications = () => {
                 })
               )}
 
-              <Card className="bg-card border p-6 flex items-center justify-between">
-                <div>
+              <Card className="bg-card border p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="min-w-0">
                   <h3 className="font-heading text-xl font-semibold text-foreground">Control your alerts</h3>
                   <p className="text-muted-foreground text-sm">Choose channels for price updates, docs, and visits.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
                   <Button variant="outline">
                     Mute all
                   </Button>

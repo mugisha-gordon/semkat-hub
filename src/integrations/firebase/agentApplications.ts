@@ -1,144 +1,116 @@
 import {
   collection,
-  doc,
-  getDoc,
-  getDocs,
   addDoc,
-  updateDoc,
+  getDocs,
+  getDoc,
   query,
-  orderBy,
   where,
-  limit,
+  limit as limitFn,
+  doc,
+  updateDoc,
+  serverTimestamp,
   Timestamp,
-} from 'firebase/firestore';
-import { db } from './client';
-import type {
-  AgentApplicationDocument,
-  CreateAgentApplicationDocument,
-  UpdateAgentApplicationDocument,
-} from './types';
+  orderBy,
+  onSnapshot,
+} from "firebase/firestore";
+import { db } from "./client";
+import type { AgentApplicationDocument, CreateAgentApplicationDocument, UpdateAgentApplicationDocument } from "./types";
+import { createNotification } from "./notifications";
+import { getUserIdByEmail } from "./users";
 
-const COLLECTION_NAME = 'agentApplications';
+const COLLECTION_NAME = "agentApplications";
+const ADMIN_EMAIL = "adminsemkat@gmail.com";
 
-/**
- * Get all agent applications (admin only, or user's own)
- */
-export async function getAgentApplications(
-  userId?: string,
-  status?: 'pending' | 'approved' | 'rejected',
-  limitCount?: number
-): Promise<AgentApplicationDocument[]> {
-  const applicationsRef = collection(db, COLLECTION_NAME);
-  let q = query(applicationsRef, orderBy('createdAt', 'desc'));
-  
-  if (userId) {
-    q = query(q, where('userId', '==', userId));
-  }
-  
-  if (status) {
-    q = query(q, where('status', '==', status));
-  }
-
-  if (limitCount) {
-    q = query(q, limit(limitCount));
-  }
-  
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as AgentApplicationDocument[];
-}
-
-/**
- * Get a single agent application by ID
- */
-export async function getAgentApplication(
-  applicationId: string
-): Promise<AgentApplicationDocument | null> {
-  const applicationRef = doc(db, COLLECTION_NAME, applicationId);
-  const applicationSnap = await getDoc(applicationRef);
-  
-  if (!applicationSnap.exists()) {
-    return null;
-  }
-  
-  return {
-    id: applicationSnap.id,
-    ...applicationSnap.data(),
-  } as AgentApplicationDocument;
-}
-
-/**
- * Create a new agent application
- */
-export async function createAgentApplication(
-  data: CreateAgentApplicationDocument
-): Promise<string> {
-  const applicationsRef = collection(db, COLLECTION_NAME);
-  const applicationData = {
+// Create / apply (alias for compatibility)
+export async function applyForAgent(userId: string, data: CreateAgentApplicationDocument): Promise<string> {
+  const ref = collection(db, COLLECTION_NAME);
+  const payload = {
     ...data,
-    status: 'pending' as const,
+    userId,
+    status: "pending",
     reviewedBy: null,
     reviewedAt: null,
     notes: null,
-    createdAt: Timestamp.now(),
+    createdAt: serverTimestamp() as unknown as Timestamp,
   };
-  
-  const docRef = await addDoc(applicationsRef, applicationData);
-  return docRef.id;
-}
+  const r = await addDoc(ref, payload);
 
-/**
- * Update an agent application (admin only)
- */
-export async function updateAgentApplication(
-  applicationId: string,
-  updates: UpdateAgentApplicationDocument
-): Promise<void> {
-  const applicationRef = doc(db, COLLECTION_NAME, applicationId);
-  
-  // If status is being updated, set reviewedAt
-  if (updates.status && updates.status !== 'pending') {
-    updates.reviewedAt = Timestamp.now();
+  try {
+    const adminId = await getUserIdByEmail(ADMIN_EMAIL);
+    if (adminId) {
+      await createNotification({
+        audience: 'user',
+        userId: adminId,
+        type: 'info',
+        title: 'New agent application',
+        description: `${data.fullName} submitted an agent application.`,
+      });
+    }
+  } catch {
+    // ignore notification failures
   }
-  
-  await updateDoc(applicationRef, updates as any);
+
+  return r.id;
+}
+export const createAgentApplication = applyForAgent;
+
+// Query applications (optional filters)
+export async function getAgentApplications(userId?: string, status?: "pending" | "approved" | "rejected", limit?: number): Promise<AgentApplicationDocument[]> {
+  const ref = collection(db, COLLECTION_NAME);
+  // Avoid composite indexes by not mixing where(...) with orderBy(...)
+  let q: any;
+  if (userId) {
+    q = query(ref, where("userId", "==", userId));
+  } else if (status) {
+    q = query(ref, where("status", "==", status));
+  } else {
+    q = query(ref, orderBy("createdAt", "desc"));
+  }
+  if (limit) q = query(q, limitFn(limit));
+  const snap = await getDocs(q);
+  let items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as AgentApplicationDocument[];
+  if (userId && status) {
+    items = items.filter((i) => i.status === status);
+  }
+  items.sort((a: any, b: any) => {
+    const at = a?.createdAt?.toMillis?.() || 0;
+    const bt = b?.createdAt?.toMillis?.() || 0;
+    return bt - at;
+  });
+  return items;
 }
 
-/**
- * Approve an agent application (admin only)
- */
-export async function approveAgentApplication(
-  applicationId: string,
-  applicationUserId: string,
-  approvedBy: string,
-  notes?: string
-): Promise<void> {
-  const applicationRef = doc(db, COLLECTION_NAME, applicationId);
-  
-  await updateDoc(applicationRef, {
-    status: 'approved',
-    reviewedBy: approvedBy,
-    reviewedAt: Timestamp.now(),
-    notes: notes || null,
-  });
+export async function getAgentApplication(applicationId: string): Promise<AgentApplicationDocument | null> {
+  const ref = doc(db, COLLECTION_NAME, applicationId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...(snap.data() as any) } as AgentApplicationDocument;
 }
 
-/**
- * Reject an agent application (admin only)
- */
-export async function rejectAgentApplication(
-  applicationId: string,
-  approvedBy: string,
-  notes?: string
-): Promise<void> {
-  const applicationRef = doc(db, COLLECTION_NAME, applicationId);
-  
-  await updateDoc(applicationRef, {
-    status: 'rejected',
-    reviewedBy: approvedBy,
-    reviewedAt: Timestamp.now(),
-    notes: notes || null,
-  });
+export async function approveAgentApplication(applicationId: string, adminId: string, notes?: string | null): Promise<void> {
+  const ref = doc(db, COLLECTION_NAME, applicationId);
+  await updateDoc(ref, { status: "approved", reviewedBy: adminId, reviewedAt: serverTimestamp(), notes: notes || null });
 }
+
+export async function rejectAgentApplication(applicationId: string, adminId: string, notes?: string | null): Promise<void> {
+  const ref = doc(db, COLLECTION_NAME, applicationId);
+  await updateDoc(ref, { status: "rejected", reviewedBy: adminId, reviewedAt: serverTimestamp(), notes: notes || null });
+}
+
+export function subscribeToAgentApplications(callback: (apps: AgentApplicationDocument[]) => void, status?: "pending" | "approved" | "rejected", limit?: number) {
+  const ref = collection(db, COLLECTION_NAME);
+  // Avoid composite indexes by not mixing where(...) with orderBy(...)
+  let q: any = status ? query(ref, where("status", "==", status)) : query(ref, orderBy("createdAt", "desc"));
+  if (limit) q = query(q, limitFn(limit));
+  const unsub = onSnapshot(q, (snap) => {
+    const apps = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as AgentApplicationDocument[];
+    apps.sort((a: any, b: any) => {
+      const at = a?.createdAt?.toMillis?.() || 0;
+      const bt = b?.createdAt?.toMillis?.() || 0;
+      return bt - at;
+    });
+    callback(apps);
+  });
+  return unsub;
+}
+

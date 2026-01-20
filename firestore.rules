@@ -15,17 +15,22 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    // Helper function to get user document
+    // Helper function to check if user document exists
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    // Helper function to get user document (safe - checks existence first)
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userExists() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
     }
     
     // Helper function to check if user is admin
     function isAdmin() {
-      return (isBootstrapAdmin()) ||
+      return isBootstrapAdmin() ||
              (isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             getUserData().role == 'admin');
+              userExists() &&
+              getUserData().role == 'admin');
     }
     
     // Helper function to check if user is owner or admin
@@ -37,47 +42,62 @@ service cloud.firestore {
     // Helper function to check if user has specific role
     function hasRole(role) {
       return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             userExists() &&
              getUserData().role == role;
     }
     
     // Users collection
     match /users/{userId} {
       // Users can view all user documents (for profile viewing)
-      allow read: if isAuthenticated();
+      // Admins can read all users (including for queries)
+      allow read: if isBootstrapAdmin() ||
+                    isAdmin() ||
+                    isAuthenticated() ||
+                    (
+                      // Allow public reads of approved agent profiles for public pages (Agents/Home)
+                      resource.data.role == 'agent' &&
+                      resource.data.roles != null &&
+                      resource.data.roles.agent != null
+                    );
       
       // Users can update their own document
+      // Admins can update any user document (for role management)
       allow update: if (isBootstrapAdmin()) ||
+                      (isAdmin()) ||
                       (isOwnerOrAdmin(userId) &&
                       // Prevent role escalation (only admins can change roles)
                       (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile', 'updatedAt']) || isAdmin()));
       
       // Users can create their own document (on signup)
+      // Admins can create user documents (for agent registration)
       allow create: if (isBootstrapAdmin()) ||
+                      (isAdmin()) ||
                       (isAuthenticated() && 
                       request.auth.uid == userId &&
                       request.resource.data.userId == userId &&
                       request.resource.data.role == 'user');
       
       // Only admins can delete users
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || isBootstrapAdmin();
     }
     
     // Agent Applications collection
     match /agentApplications/{applicationId} {
       // Users can read their own applications
-      allow read: if isAuthenticated() && 
-                    (resource.data.userId == request.auth.uid || isAdmin());
+      // Admins can read all applications (including queries)
+      allow read: if isBootstrapAdmin() || 
+                    isAdmin() || 
+                    (isAuthenticated() && resource.data.userId == request.auth.uid);
       
       // Users can create their own applications
       allow create: if isAuthenticated() && 
                       request.resource.data.userId == request.auth.uid;
       
       // Only admins can update applications (to approve/reject)
-      allow update: if isAdmin();
+      allow update: if isAdmin() || isBootstrapAdmin();
       
       // Only admins can delete applications
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || isBootstrapAdmin();
     }
     
     // Properties collection
@@ -86,13 +106,14 @@ service cloud.firestore {
       allow read: if true;
       
       // Agents and admins can create properties
+      // Admin can create properties even if they don't have 'agent' role in Firestore
       allow create: if isAuthenticated() && 
-                      (hasRole('agent') || isAdmin()) &&
+                      (hasRole('agent') || isAdmin() || isBootstrapAdmin()) &&
                       request.resource.data.agentId == request.auth.uid;
       
       // Only the agent/admin who owns it or admin can update/delete
       allow update, delete: if isAuthenticated() && 
-                              (resource.data.agentId == request.auth.uid || isAdmin());
+                              (resource.data.agentId == request.auth.uid || isAdmin() || isBootstrapAdmin());
     }
     
     // Videos collection (Explore feed)
@@ -100,21 +121,48 @@ service cloud.firestore {
       // Everyone can read videos
       allow read: if true;
       
-      // Authenticated users (agents or regular users) can create videos
+      // Authenticated users (agents, regular users, or admins) can create videos
       allow create: if isAuthenticated() && 
-                      request.resource.data.userId == request.auth.uid;
+                      (request.resource.data.userId == request.auth.uid || isAdmin() || isBootstrapAdmin());
       
-      // Only the owner or admin can update/delete
-      allow update, delete: if isAuthenticated() && 
-                              (resource.data.userId == request.auth.uid || isAdmin());
+      // Owners/admins can update/delete.
+      // Additionally, allow authenticated users to update ONLY engagement fields
+      // so likes/comments work for non-owners.
+      allow update: if isAuthenticated() && (
+                      (resource.data.userId == request.auth.uid || isAdmin() || isBootstrapAdmin()) ||
+                      (
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likes', 'comments', 'updatedAt'])
+                      )
+                    );
+      allow delete: if isAuthenticated() && 
+                      (resource.data.userId == request.auth.uid || isAdmin() || isBootstrapAdmin());
+    }
+
+    // Video comments subcollection
+    match /videos/{videoId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin() || isBootstrapAdmin());
+      allow update: if false;
+    }
+
+    // User-scoped subcollections
+    match /users/{userId}/favorites/{favoriteId} {
+      allow read, write, delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/recentSearches/{searchId} {
+      allow read, write, delete: if isAuthenticated() && request.auth.uid == userId;
     }
     
     // Messages collection
     match /messages/{messageId} {
       // Users can read messages in conversations they're part of
-      allow read: if isAuthenticated() && 
-                    (resource.data.senderId == request.auth.uid || 
-                     resource.data.receiverId == request.auth.uid);
+      allow read: if isAuthenticated() &&
+                    (
+                      (resource.data.senderId != null && resource.data.senderId == request.auth.uid) ||
+                      (resource.data.receiverId != null && resource.data.receiverId == request.auth.uid)
+                    );
       
       // Users can create messages
       allow create: if isAuthenticated() && 
@@ -128,16 +176,54 @@ service cloud.firestore {
     // Conversations collection
     match /conversations/{conversationId} {
       // Users can read conversations they're part of
-      allow read: if isAuthenticated() && 
+      allow read: if isAuthenticated() &&
+                    resource.data.participantIds != null &&
                     request.auth.uid in resource.data.participantIds;
       
       // Conversations are created automatically when messages are sent
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() &&
+                      request.resource.data.participantIds != null &&
                       request.auth.uid in request.resource.data.participantIds;
       
       // Users can update conversations they're part of
-      allow update: if isAuthenticated() && 
+      allow update: if isAuthenticated() &&
+                      resource.data.participantIds != null &&
                       request.auth.uid in resource.data.participantIds;
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can read notifications targeted to them or global ones
+      allow read: if isAuthenticated() &&
+                    (
+                      resource.data.audience == 'all' ||
+                      (resource.data.userId != null && resource.data.userId == request.auth.uid)
+                    );
+
+      // Authenticated clients can create user-targeted notifications.
+      // Global notifications should be admin-only.
+      allow create: if isAuthenticated() && (
+                      (
+                        request.resource.data.audience == 'user' &&
+                        request.resource.data.userId != null
+                      ) ||
+                      (
+                        request.resource.data.audience == 'all' && (isAdmin() || isBootstrapAdmin())
+                      )
+                    );
+
+      // Users can mark their own notifications as read; admins can update any.
+      allow update: if isAuthenticated() && (
+                      (isAdmin() || isBootstrapAdmin()) ||
+                      (
+                        resource.data.userId != null &&
+                        resource.data.userId == request.auth.uid &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'updatedAt'])
+                      )
+                    );
+
+      // Only admins can delete notifications
+      allow delete: if isAdmin() || isBootstrapAdmin();
     }
     
     // Deny all other collections by default

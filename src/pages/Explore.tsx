@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Heart, MessageCircle, Share2, Sparkles, Volume2, VolumeX, ChevronUp, ChevronDown, Trash2, MessageSquareText, Send } from "lucide-react";
+import { Heart, MessageCircle, Share2, Sparkles, Volume2, VolumeX, ChevronUp, ChevronDown, Trash2, MessageSquareText, Send, Plus, Play, Pause } from "lucide-react";
 import { addVideoComment, deleteVideo, subscribeToVideoComments, toggleVideoLike } from "@/integrations/firebase/videos";
 import type { VideoCommentDocument, VideoDocument } from "@/integrations/firebase/videos";
 import { useAuth } from "@/context/AuthContext";
@@ -18,13 +18,28 @@ import { deleteFile } from "@/integrations/firebase/storage";
 import { subscribeToVideosFeed } from "@/integrations/firebase/videosFeed";
 
 const Explore = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const shuffleSeedRef = useRef<number>(Date.now());
   const [clips, setClips] = useState<VideoDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [authorNames, setAuthorNames] = useState<{ [userId: string]: string }>({});
   const [authorAvatars, setAuthorAvatars] = useState<{ [userId: string]: string | undefined }>({});
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [muted, setMuted] = useState(true);
+  const currentIndexRef = useRef(0);
+  const userToggledMuteRef = useRef(false);
+  const autoplayForcedMutedRef = useRef(false);
+  const [muted, setMuted] = useState(() => {
+    const raw = localStorage.getItem('semkat_explore_muted');
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    // Default to sound ON; browsers may force muted autoplay and we'll fall back.
+    return false;
+  });
+  const [paused, setPaused] = useState(false);
+  const userPausedRef = useRef(false);
+  const [readyByClipId, setReadyByClipId] = useState<Record<string, boolean>>({});
+  const [errorByClipId, setErrorByClipId] = useState<Record<string, boolean>>({});
+  const [showHeader, setShowHeader] = useState(true);
   const [messageOpen, setMessageOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<VideoCommentDocument[]>([]);
@@ -32,9 +47,89 @@ const Explore = () => {
   const [commentSending, setCommentSending] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const lastNavAtRef = useRef<number>(0);
+  const navLockRef = useRef(false);
   const currentClip = clips[currentIndex];
 
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  const attemptPlayByIndex = async (index: number, tryCount: number = 0) => {
+    const video = videoRefs.current[index];
+    if (!video) {
+      if (tryCount < 4) {
+        setTimeout(() => void attemptPlayByIndex(index, tryCount + 1), 120);
+      }
+      return;
+    }
+
+    if (index !== currentIndexRef.current) return;
+    if (userPausedRef.current) return;
+
+    try {
+      // Ensure element is in a good state for autoplay
+      video.playsInline = true;
+      video.muted = muted;
+      await video.play();
+    } catch {
+      // Autoplay is often blocked when not muted; fall back to muted autoplay.
+      if (!muted) {
+        autoplayForcedMutedRef.current = true;
+        setMuted(true);
+        return;
+      }
+      if (tryCount < 4) {
+        setTimeout(() => void attemptPlayByIndex(index, tryCount + 1), 180);
+      }
+    }
+  };
+
   const location = useLocation() as { state?: { fromUpload?: boolean } };
+
+  const readAuthorCache = () => {
+    try {
+      const raw = localStorage.getItem('semkat_author_cache_v1');
+      if (!raw) return {} as Record<string, { name?: string; avatar?: string }>;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {} as Record<string, { name?: string; avatar?: string }>;
+      return parsed as Record<string, { name?: string; avatar?: string }>;
+    } catch {
+      return {} as Record<string, { name?: string; avatar?: string }>;
+    }
+  };
+
+  const writeAuthorCache = (next: Record<string, { name?: string; avatar?: string }>) => {
+    try {
+      localStorage.setItem('semkat_author_cache_v1', JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  const displayNameForUserId = (userId: string) => {
+    const fromState = authorNames[userId];
+    if (fromState && fromState !== 'Unknown') return fromState;
+    const cached = readAuthorCache();
+    const fromCache = cached?.[userId]?.name;
+    if (fromCache && fromCache !== 'Unknown') return fromCache;
+    return 'User';
+  };
+
+  const rankForId = (id: string) => {
+    // Deterministic pseudo-random rank based on seed + id
+    let h = 2166136261;
+    const s = `${shuffleSeedRef.current}:${id}`;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  };
+
+  const shuffleBySeed = (items: VideoDocument[]) => {
+    return [...items].sort((a, b) => rankForId(a.id) - rankForId(b.id));
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -42,7 +137,7 @@ const Explore = () => {
     const unsubscribe = subscribeToVideosFeed(
       30,
       (videos) => {
-        setClips(videos);
+        setClips(shuffleBySeed(videos));
         setLoading(false);
         setCurrentIndex((i) => Math.min(i, Math.max(0, videos.length - 1)));
       },
@@ -59,48 +154,95 @@ const Explore = () => {
   // Keep author metadata in sync as the feed updates
   useEffect(() => {
     const userIds = [...new Set(clips.map((v) => v.userId))];
-    const missingIds = userIds.filter((id) => !authorNames[id]);
+
+    // Pre-fill from cache so names persist across refresh (even if user docs can't be read).
+    const cached = readAuthorCache();
+    if (Object.keys(cached).length) {
+      setAuthorNames((prev) => {
+        const next = { ...prev };
+        userIds.forEach((id) => {
+          const c = cached[id];
+          if (c?.name && !next[id]) next[id] = c.name;
+        });
+        return next;
+      });
+      setAuthorAvatars((prev) => {
+        const next = { ...prev };
+        userIds.forEach((id) => {
+          const c = cached[id];
+          if (c?.avatar && !next[id]) next[id] = c.avatar;
+        });
+        return next;
+      });
+    }
+
+    const missingIds = userIds.filter((id) => !authorNames[id] || authorNames[id] === 'Unknown');
     if (missingIds.length === 0) return;
 
     Promise.all(
       missingIds.map(async (userId) => {
         try {
           const userDoc = await getUserDocument(userId);
+          const fullName = userDoc?.profile?.fullName || undefined;
+          const email = (userDoc as any)?.email || undefined;
+          const emailName = typeof email === 'string' && email.includes('@') ? email.split('@')[0] : undefined;
+          const name = fullName || emailName;
+          if (!name) return null;
           return {
             userId,
-            name: userDoc?.profile.fullName || "Unknown",
+            name,
             avatar: userDoc?.profile.avatarUrl || undefined,
           };
         } catch {
-          return { userId, name: "Unknown", avatar: undefined };
+          // Likely permission denied before auth initializes or transient network error.
+          // Avoid caching 'Unknown' so we can retry later.
+          return null;
         }
       })
     )
       .then((results) => {
         setAuthorNames((prev) => {
           const next = { ...prev };
-          results.forEach((r) => {
+          results.filter(Boolean).forEach((r: any) => {
             next[r.userId] = r.name;
           });
           return next;
         });
         setAuthorAvatars((prev) => {
           const next = { ...prev };
-          results.forEach((r) => {
+          results.filter(Boolean).forEach((r: any) => {
             next[r.userId] = r.avatar;
           });
           return next;
         });
+
+        // Persist successful lookups
+        const cache = readAuthorCache();
+        let changed = false;
+        results.filter(Boolean).forEach((r: any) => {
+          if (!r?.userId || !r?.name || r.name === 'Unknown') return;
+          const prevEntry = cache[r.userId] || {};
+          const nextEntry = {
+            name: r.name,
+            avatar: r.avatar || prevEntry.avatar,
+          };
+          cache[r.userId] = nextEntry;
+          changed = true;
+        });
+        if (changed) writeAuthorCache(cache);
       })
       .catch(() => {});
-  }, [clips, authorNames]);
+  }, [clips, authorNames, user]);
 
   // If we navigated here right after an upload, jump to the newest clip
   useEffect(() => {
     if (location.state?.fromUpload) {
-      setCurrentIndex(0);
+      // Wait a moment for Firestore to update, then jump to newest
+      setTimeout(() => {
+        setCurrentIndex(0);
+      }, 500);
     }
-  }, [location.state]);
+  }, [location.state, clips]);
 
   const refreshVideos = async () => {
     // kept for backwards compatibility with the upload button (realtime already updates)
@@ -109,16 +251,49 @@ const Explore = () => {
 
   const goToSlide = (index: number) => {
     if (index >= 0 && index < clips.length) {
+      setShowHeader(index <= currentIndexRef.current);
       setCurrentIndex(index);
     }
   };
 
+  const goToNext = () => {
+    setShowHeader(false);
+    setCurrentIndex((prev) => Math.min(clips.length - 1, prev + 1));
+  };
+
+  const goToPrev = () => {
+    setShowHeader(true);
+    setCurrentIndex((prev) => Math.max(0, prev - 1));
+  };
+
+  const lockNav = () => {
+    navLockRef.current = true;
+    setTimeout(() => {
+      navLockRef.current = false;
+    }, 450);
+  };
+
   const handleScroll = (e: React.WheelEvent) => {
     e.preventDefault();
+
+    // Desktop interaction: if autoplay forced us to mute, unmute on first user intent
+    // unless they explicitly chose muted.
+    if (autoplayForcedMutedRef.current && !userToggledMuteRef.current) {
+      autoplayForcedMutedRef.current = false;
+      setMuted(false);
+    }
+
+    const now = Date.now();
+    if (navLockRef.current) return;
+    if (now - lastNavAtRef.current < 450) return;
     if (e.deltaY > 0 && currentIndex < clips.length - 1) {
-      goToSlide(currentIndex + 1);
+      lastNavAtRef.current = now;
+      lockNav();
+      goToNext();
     } else if (e.deltaY < 0 && currentIndex > 0) {
-      goToSlide(currentIndex - 1);
+      lastNavAtRef.current = now;
+      lockNav();
+      goToPrev();
     }
   };
 
@@ -126,15 +301,29 @@ const Explore = () => {
   const touchStartY = useRef(0);
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
+
+    // If autoplay forced us to mute, and the user hasn't explicitly muted,
+    // treat the first interaction as intent to enable sound.
+    if (autoplayForcedMutedRef.current && !userToggledMuteRef.current) {
+      autoplayForcedMutedRef.current = false;
+      setMuted(false);
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     const deltaY = touchStartY.current - e.changedTouches[0].clientY;
-    if (Math.abs(deltaY) > 50) {
+    const now = Date.now();
+    if (navLockRef.current) return;
+    if (now - lastNavAtRef.current < 450) return;
+    if (Math.abs(deltaY) > 40) {
       if (deltaY > 0 && currentIndex < clips.length - 1) {
-        goToSlide(currentIndex + 1);
+        lastNavAtRef.current = now;
+        lockNav();
+        goToNext();
       } else if (deltaY < 0 && currentIndex > 0) {
-        goToSlide(currentIndex - 1);
+        lastNavAtRef.current = now;
+        lockNav();
+        goToPrev();
       }
     }
   };
@@ -144,14 +333,46 @@ const Explore = () => {
     videoRefs.current.forEach((video, index) => {
       if (video) {
         if (index === currentIndex) {
-          video.play().catch(() => {});
+          // Autoplay is only allowed by browsers when muted (and playsInline on iOS).
+          // If the element isn't ready yet, the onCanPlay handler below will kick it too.
+          if (!userPausedRef.current) {
+            video.play().catch(() => {});
+          }
         } else {
           video.pause();
-          video.currentTime = 0;
         }
       }
     });
+  }, [currentIndex, clips.length, muted]);
+
+  // When switching clips, default to playing the new clip
+  useEffect(() => {
+    userPausedRef.current = false;
+    setPaused(false);
   }, [currentIndex]);
+
+  // Ensure the currently visible video starts playing after swipe/scroll
+  useEffect(() => {
+    void attemptPlayByIndex(currentIndexRef.current, 0);
+    setTimeout(() => {
+      void attemptPlayByIndex(currentIndexRef.current, 0);
+    }, 120);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, muted]);
+
+  const togglePlayPause = () => {
+    const video = videoRefs.current[currentIndex];
+    if (!video) return;
+
+    if (video.paused) {
+      userPausedRef.current = false;
+      video.play().then(() => setPaused(false)).catch(() => {});
+    } else {
+      video.pause();
+      userPausedRef.current = true;
+      setPaused(true);
+    }
+  };
 
   const toggleLike = async (clipId: string) => {
     if (!user) {
@@ -173,12 +394,47 @@ const Explore = () => {
     }
   };
 
+  const handleShare = async (clip: VideoDocument) => {
+    const shareUrl = `${window.location.origin}/explore?video=${encodeURIComponent(clip.id)}`;
+    const shareText = `${clip.title} • ${clip.location}`;
+
+    try {
+      const nav: any = navigator;
+      if (nav?.share) {
+        await nav.share({ title: clip.title, text: shareText, url: shareUrl });
+        toast.success('Shared');
+        return;
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success('Link copied');
+        return;
+      }
+
+      const textarea = document.createElement('textarea');
+      textarea.value = shareUrl;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+      toast.success('Link copied');
+    } catch (error: any) {
+      console.error('Share failed', error);
+      toast.error(error?.message || 'Failed to share');
+    }
+  };
+
   const handleDelete = async (clip: VideoDocument) => {
     if (!user) {
       toast.error('Please log in');
       return;
     }
-    if (clip.userId !== user.uid) {
+
+    const isAdmin = role === 'admin' || user.email === 'adminsemkat@gmail.com';
+    if (clip.userId !== user.uid && !isAdmin) {
       toast.error('You can only delete your own videos');
       return;
     }
@@ -306,6 +562,36 @@ const Explore = () => {
             <Sparkles className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p className="text-white/60">No videos yet</p>
             <p className="text-white/40 text-sm mt-1">Be the first to post a video!</p>
+
+            {user ? (
+              <div className="mt-5 flex justify-center">
+                <VideoPostForm
+                  onSuccess={() => {
+                    setCurrentIndex(0);
+                    setTimeout(() => {
+                      refreshVideos();
+                    }, 1000);
+                  }}
+                  triggerVariant="hero"
+                  triggerSize="lg"
+                  triggerClassName="h-14 w-14 rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center"
+                  triggerLabel=""
+                />
+              </div>
+            ) : (
+              <div className="mt-5 flex justify-center">
+                <Button
+                  variant="hero"
+                  className="gap-2"
+                  onClick={() => {
+                    window.location.href = "/auth";
+                  }}
+                >
+                  <Plus className="h-5 w-5" />
+                  Post Video
+                </Button>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -313,29 +599,47 @@ const Explore = () => {
   }
 
   const isLiked = user && currentClip?.likedBy?.includes(user.uid);
+  const headerVisible = currentIndex === 0 || showHeader;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-white">
-      <Header />
+    <div className="min-h-screen bg-slate-950 text-white">
+      <div
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+          headerVisible ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"
+        }`}
+      >
+        <Header />
+      </div>
 
-      <main className="flex-1 relative overflow-hidden">
-        {/* Upload button */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-          <VideoPostForm
-            onSuccess={refreshVideos}
-            triggerVariant="hero"
-            triggerSize="icon"
-            triggerClassName="h-10 w-10 rounded-full"
-            triggerLabel=""
-          />
-        </div>
+      <main
+        className="relative overflow-hidden min-h-0"
+        style={{ height: "100dvh" }}
+      >
+        {/* Upload button - Plus button for logged in users */}
+        {user && (
+          <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
+            <VideoPostForm
+              onSuccess={() => {
+                // Refresh and scroll to top to show new video
+                setCurrentIndex(0);
+                setTimeout(() => {
+                  refreshVideos();
+                }, 1000);
+              }}
+              triggerVariant="hero"
+              triggerSize="icon"
+              triggerClassName="h-11 w-11 sm:h-12 sm:w-12 rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center"
+              triggerLabel=""
+            />
+          </div>
+        )}
 
         {currentClip && (
           <MessageDialog
             open={messageOpen}
             onOpenChange={setMessageOpen}
             otherUserId={currentClip.userId}
-            otherUserName={authorNames[currentClip.userId]}
+            otherUserName={displayNameForUserId(currentClip.userId)}
           />
         )}
 
@@ -352,15 +656,19 @@ const Explore = () => {
                 ) : (
                   comments.map((c) => (
                     <div key={c.id} className="flex gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={authorAvatars[c.userId]} />
-                        <AvatarFallback className="bg-white/10 text-white/80 text-xs">
-                          {(authorNames[c.userId] || 'U').slice(0, 1).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
+                      <Link to={`/profile/${c.userId}`} className="shrink-0">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={authorAvatars[c.userId]} />
+                          <AvatarFallback className="bg-white/10 text-white/80 text-xs">
+                            {displayNameForUserId(c.userId).slice(0, 1).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </Link>
                       <div className="flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm text-white/90">{authorNames[c.userId] || 'Unknown'}</p>
+                          <Link to={`/profile/${c.userId}`} className="text-sm text-white/90 hover:underline">
+                            {displayNameForUserId(c.userId)}
+                          </Link>
                           <p className="text-xs text-white/40">
                             {c.createdAt?.toDate?.().toLocaleString?.()}
                           </p>
@@ -396,133 +704,227 @@ const Explore = () => {
         {/* TikTok-style vertical snap scroll container */}
         <div
           ref={containerRef}
-          className="h-[calc(100vh-80px)] overflow-hidden relative"
+          className="relative overflow-hidden h-full"
+          style={{ height: headerVisible ? "calc(100dvh - 4rem)" : "100dvh", marginTop: headerVisible ? "4rem" : "0" }}
           onWheel={handleScroll}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
           {/* Video slides */}
           <div
-            className="transition-transform duration-500 ease-out h-full"
-            style={{ transform: `translateY(-${currentIndex * 100}%)` }}
+            className="transition-transform duration-700 ease-in-out h-full flex flex-col"
+            style={{ transform: `translate3d(0, -${currentIndex * 100}%, 0)`, willChange: 'transform' }}
           >
             {clips.map((clip, index) => (
-              <div key={clip.id} className="h-full w-full relative flex items-center justify-center">
-                {/* Video */}
-                <video
-                  ref={el => { videoRefs.current[index] = el; }}
-                  className="h-full w-full object-cover"
-                  src={clip.videoUrl}
-                  poster={clip.coverUrl || undefined}
-                  muted={muted}
-                  loop
-                  playsInline
-                  controls={false}
-                  preload={index === currentIndex ? "auto" : "metadata"}
-                />
+              <div key={clip.id} className="h-full w-full shrink-0 relative flex items-center justify-center bg-black">
+                {Math.abs(index - currentIndex) <= 1 ? (
+                  <video
+                    ref={el => { videoRefs.current[index] = el; }}
+                    className="h-full w-full max-h-full max-w-full object-contain bg-black"
+                    src={clip.videoUrl}
+                    poster={clip.coverUrl || undefined}
+                    muted={index === currentIndex ? muted : true}
+                    autoPlay={index === currentIndex}
+                    loop
+                    playsInline
+                    controls={false}
+                    preload="auto"
+                    onLoadedData={() => {
+                      setReadyByClipId((prev) => ({ ...prev, [clip.id]: true }));
+                      setErrorByClipId((prev) => ({ ...prev, [clip.id]: false }));
+                      if (index === currentIndexRef.current && !userPausedRef.current) {
+                        void attemptPlayByIndex(index, 0);
+                      }
+                    }}
+                    onLoadedMetadata={() => {
+                      setReadyByClipId((prev) => ({ ...prev, [clip.id]: true }));
+                      setErrorByClipId((prev) => ({ ...prev, [clip.id]: false }));
+                    }}
+                    onError={() => {
+                      setErrorByClipId((prev) => ({ ...prev, [clip.id]: true }));
+                    }}
+                    onCanPlay={() => {
+                      if (index !== currentIndexRef.current) return;
+                      if (userPausedRef.current) return;
+                      void attemptPlayByIndex(index, 0);
+                    }}
+                  />
+                ) : clip.coverUrl ? (
+                  <img
+                    src={clip.coverUrl}
+                    alt={clip.title}
+                    className="h-full w-full object-contain bg-black"
+                    draggable={false}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="h-full w-full bg-black" />
+                )}
+
+                {/* Loading / error overlay to avoid blank screens */}
+                {index === currentIndex && !readyByClipId[clip.id] && !errorByClipId[clip.id] && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                    <div className="w-10 h-10 border-4 border-white/70 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+                {index === currentIndex && errorByClipId[clip.id] && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60 px-6 text-center">
+                    <p className="text-white/80 text-sm">This video failed to load. Swipe to the next one.</p>
+                  </div>
+                )}
                 
                 {/* Gradient overlays */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
                 
                 {/* Content overlay */}
-                <div className="absolute bottom-0 left-0 right-0 p-6 pb-24">
+                <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 pb-20 sm:pb-24">
                   <Badge 
                     variant="outline" 
                     className="border-white/40 text-white/90 mb-3 bg-black/30 backdrop-blur-sm"
                   >
-                    {clip.role === "agent" ? "Agent" : "User"} • {clip.location}
+                    {clip.role === "agent" ? "Agent" : displayNameForUserId(clip.userId)} • {clip.location}
                   </Badge>
                   <h3 className="font-heading text-2xl font-bold mb-1 drop-shadow-lg">{clip.title}</h3>
                   <div className="flex items-center gap-2">
-                    <Avatar className="h-7 w-7 border border-white/15">
-                      <AvatarImage src={authorAvatars[clip.userId]} />
-                      <AvatarFallback className="bg-white/10 text-white/80 text-xs">
-                        {(authorNames[clip.userId] || 'U').slice(0, 1).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <p className="text-white/80 text-sm">@{authorNames[clip.userId] || 'Unknown'}</p>
+                    <Link to={`/profile/${clip.userId}`} className="flex items-center gap-2">
+                      <Avatar className="h-7 w-7 border border-white/15">
+                        <AvatarImage src={authorAvatars[clip.userId]} />
+                        <AvatarFallback className="bg-white/10 text-white/80 text-xs">
+                          {displayNameForUserId(clip.userId).slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <p className="text-white text-sm font-semibold leading-tight hover:underline">
+                        {displayNameForUserId(clip.userId)}
+                      </p>
+                    </Link>
                   </div>
                 </div>
 
                 {/* Right side action buttons */}
-                <div className="absolute right-4 bottom-32 flex flex-col items-center gap-5">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`h-12 w-12 rounded-full bg-black/30 backdrop-blur-sm hover:bg-black/50 ${
-                      index === currentIndex && isLiked ? 'text-red-500' : 'text-white'
-                    }`}
-                    onClick={() => toggleLike(clip.id)}
-                  >
-                    <Heart className={`h-6 w-6 ${index === currentIndex && isLiked ? 'fill-current' : ''}`} />
-                  </Button>
-                  <span className="text-xs text-white/80">{clip.likes || 0}</span>
-                  
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-12 w-12 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
-                    onClick={() => {
-                      if (!user) {
-                        window.location.href = "/auth";
-                        return;
-                      }
-                      setCommentsOpen(true);
-                    }}
-                  >
-                    <MessageSquareText className="h-6 w-6" />
-                  </Button>
-                  <span className="text-xs text-white/80">{clip.comments || 0}</span>
+                <div className="absolute right-3 sm:right-4 bottom-24 sm:bottom-32 flex flex-col flex-nowrap items-center gap-2 sm:gap-3 max-h-[62dvh] overflow-y-auto pr-1">
+                  <div className="flex flex-col items-center gap-1">
+                    {/* Play/Pause toggle */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                      onClick={togglePlayPause}
+                    >
+                      {index === currentIndex && paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">{index === currentIndex && paused ? 'Play' : 'Pause'}</span>
+                  </div>
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-12 w-12 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
-                    onClick={() => {
-                      if (!user) {
-                        window.location.href = "/auth";
-                        return;
-                      }
-                      setMessageOpen(true);
-                    }}
-                  >
-                    <MessageCircle className="h-6 w-6" />
-                  </Button>
-                  <span className="text-xs text-white/80">Message</span>
+                  <div className="flex flex-col items-center gap-1">
+                    {/* Sound toggle */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                      onClick={() => {
+                        userToggledMuteRef.current = true;
+                        setMuted((m) => {
+                          const next = !m;
+                          localStorage.setItem('semkat_explore_muted', String(next));
+                          return next;
+                        });
+                      }}
+                    >
+                      {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">{muted ? 'Muted' : 'Sound'}</span>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm hover:bg-black/50 ${
+                        index === currentIndex && isLiked ? 'text-red-500' : 'text-white'
+                      }`}
+                      onClick={() => toggleLike(clip.id)}
+                    >
+                      <Heart className={`h-5 w-5 ${index === currentIndex && isLiked ? 'fill-current' : ''}`} />
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">{clip.likes || 0}</span>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                      onClick={() => {
+                        if (!user) {
+                          window.location.href = "/auth";
+                          return;
+                        }
+                        setCommentsOpen(true);
+                      }}
+                    >
+                      <MessageSquareText className="h-5 w-5" />
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">{clip.comments || 0}</span>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                      onClick={() => {
+                        if (!user) {
+                          window.location.href = "/auth";
+                          return;
+                        }
+                        setMessageOpen(true);
+                      }}
+                    >
+                      <MessageCircle className="h-5 w-5" />
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">Message</span>
+                  </div>
 
                   {user && clip.userId === user.uid && (
-                    <>
+                    <div className="flex flex-col items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-12 w-12 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                        className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
                         onClick={() => handleDelete(clip)}
                       >
-                        <Trash2 className="h-6 w-6" />
+                        <Trash2 className="h-5 w-5" />
                       </Button>
-                      <span className="text-xs text-white/80">Delete</span>
-                    </>
+                      <span className="text-[10px] leading-none text-white/80">Delete</span>
+                    </div>
                   )}
-                  
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-12 w-12 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
-                  >
-                    <Share2 className="h-6 w-6" />
-                  </Button>
-                  <span className="text-xs text-white/80">Share</span>
-                </div>
 
-                {/* Sound toggle */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-4 right-16 h-10 w-10 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
-                  onClick={() => setMuted((m) => !m)}
-                >
-                  {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                </Button>
+                  {user && role === 'admin' && clip.userId !== user.uid && (
+                    <div className="flex flex-col items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                        onClick={() => handleDelete(clip)}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </Button>
+                      <span className="text-[10px] leading-none text-white/80">Delete</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+                      onClick={() => handleShare(clip)}
+                    >
+                      <Share2 className="h-5 w-5" />
+                    </Button>
+                    <span className="text-[10px] leading-none text-white/80">Share</span>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -547,7 +949,7 @@ const Explore = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="absolute top-20 left-1/2 -translate-x-1/2 h-10 w-10 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
+              className="absolute top-6 sm:top-10 left-1/2 -translate-x-1/2 h-10 w-10 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"
               onClick={() => goToSlide(currentIndex - 1)}
             >
               <ChevronUp className="h-6 w-6" />
@@ -557,7 +959,7 @@ const Explore = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="absolute bottom-20 left-1/2 -translate-x-1/2 h-10 w-10 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50 animate-bounce"
+              className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 h-10 w-10 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50 animate-bounce"
               onClick={() => goToSlide(currentIndex + 1)}
             >
               <ChevronDown className="h-6 w-6" />
@@ -565,7 +967,7 @@ const Explore = () => {
           )}
 
           {/* Header badge */}
-          <div className="absolute top-4 left-4 flex items-center gap-3">
+          <div className="absolute top-4 left-16 sm:left-20 flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center border border-white/15">
               <Sparkles className="h-5 w-5 text-orange-300" />
             </div>

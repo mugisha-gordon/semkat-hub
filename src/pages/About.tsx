@@ -104,7 +104,7 @@ const About = () => {
             <p className="text-white/70 max-w-2xl">
               Explore transparent listings, request documentation, or book a virtual tour. The future of property in Uganda is already here.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button variant="hero">Browse properties</Button>
               <Button variant="outline" className="border-white/40 text-white hover:bg-white/10">
                 Talk to an expert

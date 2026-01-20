@@ -9,9 +9,11 @@ import { cn } from '@/lib/utils';
 interface PropertyCardProps {
   property: Property;
   onSelect?: (property: Property) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (property: Property) => void;
 }
 
-const PropertyCard = ({ property, onSelect }: PropertyCardProps) => {
+const PropertyCard = ({ property, onSelect, isFavorite, onToggleFavorite }: PropertyCardProps) => {
   const statusColors: Record<string, 'success' | 'destructive' | 'warning' | 'sky'> = {
     available: 'success',
     sold: 'destructive',
@@ -52,10 +54,10 @@ const PropertyCard = ({ property, onSelect }: PropertyCardProps) => {
             className="h-9 w-9 rounded-full bg-background/80 backdrop-blur-sm hover:bg-background text-foreground"
             onClick={(e) => {
               e.stopPropagation();
-              // Handle favorite
+              onToggleFavorite?.(property);
             }}
           >
-            <Heart className="h-4 w-4" />
+            <Heart className={cn('h-4 w-4', isFavorite ? 'fill-semkat-orange text-semkat-orange' : '')} />
           </Button>
         </div>
 

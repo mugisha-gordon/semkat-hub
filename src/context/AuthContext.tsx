@@ -6,6 +6,8 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { auth } from "@/integrations/firebase/client";
@@ -18,6 +20,7 @@ interface AuthContextValue {
   session: FirebaseUser | null; // Firebase doesn't have separate session object, using user
   role: Role | null;
   loading: boolean;
+  error: string | null;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
@@ -34,6 +37,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const isNativePlatform = () => {
+    const w = globalThis as any;
+    return !!w?.Capacitor?.isNativePlatform?.();
+  };
 
   const deriveRoleFromUserDoc = (userDoc: any): Role => {
     const docRole = userDoc?.role;
@@ -44,8 +53,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   useEffect(() => {
+    // If Google sign-in uses redirect (common on mobile / in-app browsers), this
+    // finalizes the pending auth session.
+    // Safe to call even when there is no pending redirect.
+    (async () => {
+      try {
+        const redirectResult = await getRedirectResult(auth);
+        if (redirectResult?.user) {
+          const userDoc = await getUserDocument(redirectResult.user.uid);
+          if (!userDoc) {
+            await createUserDocument(
+              redirectResult.user.uid,
+              redirectResult.user.email || "",
+              redirectResult.user.displayName || undefined
+            );
+          }
+        }
+      } catch (e) {
+        // ignore; actual auth state will still be handled by onAuthStateChanged
+      }
+    })();
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
+      setError(null);
 
       if (firebaseUser) {
         try {
@@ -111,6 +142,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         } catch (error) {
           console.error("Error resolving user role:", error);
+          setError("Firebase connection error. Please check your internet connection and try again.");
           // Fallback: check email even on error
           if (firebaseUser.email === HARD_CODED_ADMIN_EMAIL) {
             setRole("admin");
@@ -149,19 +181,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
+    // Ensure onboarding intro shows on next cold-launch after sign-out
+    try {
+      localStorage.setItem("semkat_show_onboarding_on_next_open", "true");
+    } catch (e) {
+      // ignore storage errors
+    }
     await firebaseSignOut(auth);
   };
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
     try {
+      if (isNativePlatform()) {
+        await signInWithRedirect(auth, provider);
+        return { error: undefined };
+      }
+
       const result = await signInWithPopup(auth, provider);
       // Check if user document exists, create if not (first-time Google login)
       const userDoc = await getUserDocument(result.user.uid);
       if (!userDoc) {
         await createUserDocument(
           result.user.uid,
-          result.user.email || '',
+          result.user.email || "",
           result.user.displayName || undefined
         );
       }
@@ -176,6 +220,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     session: user, // Firebase uses user object as session
     role,
     loading,
+    error,
     signIn,
     signUp,
     signOut,

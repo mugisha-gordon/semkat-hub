@@ -154,7 +154,7 @@ const Services = () => {
                         {service.description}
                       </p>
                       
-                      <div className="grid grid-cols-2 gap-3 mb-8">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
                         {service.features.map((feature) => (
                           <div key={feature} className="flex items-center gap-2 text-sm">
                             <CheckCircle className="h-4 w-4 text-semkat-success flex-shrink-0" />
@@ -163,7 +163,7 @@ const Services = () => {
                         ))}
                       </div>
 
-                      <div className="flex gap-3">
+                      <div className="flex flex-col sm:flex-row gap-3">
                         <Link to="/about">
                           <Button variant="hero">
                             Learn More

@@ -3,11 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Send, MessageCircle, User } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { sendMessage, subscribeToMessages, markMessagesAsRead } from "@/integrations/firebase/messages";
 import { getUserDocument } from "@/integrations/firebase/users";
 import { toast } from "sonner";
 import type { MessageDocument } from "@/integrations/firebase/messages";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface MessageDialogProps {
   open: boolean;
@@ -92,18 +94,26 @@ const MessageDialog = ({ open, onOpenChange, otherUserId, otherUserName }: Messa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-slate-900 border-white/10 text-white flex flex-col h-[600px] max-w-md">
+      <DialogContent className="bg-slate-900 border-white/10 text-white flex flex-col h-[80vh] sm:h-[600px] w-[calc(100vw-2rem)] max-w-md min-h-0">
         <DialogHeader className="border-b border-white/10 pb-3">
           <DialogTitle className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5 text-semkat-orange" />
-            {otherUser?.name || "Message"}
+            <Link to={`/profile/${otherUserId}`} className="flex items-center gap-2 min-w-0 hover:underline">
+              <Avatar className="h-7 w-7 border border-white/15 shrink-0">
+                <AvatarImage src={otherUser?.avatar} />
+                <AvatarFallback className="bg-white/10 text-white/80 text-xs">
+                  {(otherUser?.name || otherUserName || "U").slice(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <span className="truncate">{otherUser?.name || otherUserName || "Message"}</span>
+            </Link>
           </DialogTitle>
         </DialogHeader>
 
         {/* Messages container */}
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto space-y-3 py-4 px-2"
+          className="flex-1 min-h-0 overflow-y-auto space-y-3 py-4 px-2"
         >
           {messages.length === 0 ? (
             <div className="text-center text-white/50 py-8">
@@ -125,7 +135,7 @@ const MessageDialog = ({ open, onOpenChange, otherUserId, otherUserName }: Messa
                         : "bg-white/10 text-white"
                     }`}
                   >
-                    <p className="text-sm">{msg.content}</p>
+                    <p className="text-sm break-words whitespace-pre-wrap">{msg.content}</p>
                     <p className={`text-xs mt-1 ${isOwn ? "text-white/70" : "text-white/50"}`}>
                       {msg.createdAt?.toDate?.().toLocaleTimeString([], {
                         hour: "2-digit",

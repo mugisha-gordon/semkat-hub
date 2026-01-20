@@ -4,6 +4,7 @@ import {
   getDoc,
   getDocs,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -13,8 +14,17 @@ import {
   onSnapshot,
   increment,
   Timestamp,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from './client';
+
+ function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+   const out: Record<string, any> = {};
+   for (const [k, v] of Object.entries(obj)) {
+     if (v !== undefined) out[k] = v;
+   }
+   return out as Partial<T>;
+ }
 
 export interface VideoDocument {
   id: string;
@@ -91,18 +101,35 @@ export async function addVideoComment(videoId: string, userId: string, content: 
     throw new Error('Comment cannot be empty');
   }
 
+  const videoRef = doc(db, COLLECTION_NAME, videoId);
+  const videoSnap = await getDoc(videoRef);
+  const videoOwnerId = videoSnap.exists() ? (videoSnap.data() as any)?.userId : null;
+  const videoTitle = videoSnap.exists() ? (videoSnap.data() as any)?.title : '';
+
   const commentsRef = collection(db, COLLECTION_NAME, videoId, 'comments');
   const docRef = await addDoc(commentsRef, {
     userId,
     content: trimmed,
     createdAt: Timestamp.now(),
   });
-
-  const videoRef = doc(db, COLLECTION_NAME, videoId);
   await updateDoc(videoRef, {
     comments: increment(1),
     updatedAt: Timestamp.now(),
   });
+
+  // Notify the video owner (if someone else commented)
+  if (videoOwnerId && videoOwnerId !== userId) {
+    const notifRef = doc(collection(db, 'notifications'));
+    await setDoc(notifRef, {
+      title: 'New comment',
+      description: videoTitle ? `Someone commented on your video: ${videoTitle}` : 'Someone commented on your video.',
+      type: 'success',
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+      audience: 'user',
+      userId: videoOwnerId,
+    });
+  }
 
   return docRef.id;
 }
@@ -159,14 +186,22 @@ export async function createVideo(data: CreateVideoDocument): Promise<string> {
 
   try {
     const videosRef = collection(db, COLLECTION_NAME);
-    const videoData = {
-      ...data,
+    const videoData: any = {
+      ...stripUndefined(data as any),
       likes: 0,
       comments: 0,
       likedBy: [],
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     };
+
+    // Extra guard in case callers pass undefined optional fields explicitly
+    if (videoData.description === undefined) {
+      delete videoData.description;
+    }
+    if (videoData.coverUrl === undefined) {
+      delete videoData.coverUrl;
+    }
 
     const docRef = await addDoc(videosRef, videoData);
     return docRef.id;
@@ -184,10 +219,19 @@ export async function updateVideo(
   updates: Partial<CreateVideoDocument>
 ): Promise<void> {
   const videoRef = doc(db, COLLECTION_NAME, videoId);
-  await updateDoc(videoRef, {
-    ...updates,
+  const payload: any = {
+    ...stripUndefined(updates as any),
     updatedAt: Timestamp.now(),
-  });
+  };
+
+  if (payload.description === undefined) {
+    delete payload.description;
+  }
+  if (payload.coverUrl === undefined) {
+    delete payload.coverUrl;
+  }
+
+  await updateDoc(videoRef, payload);
 }
 
 /**
@@ -206,34 +250,51 @@ export async function toggleVideoLike(
   userId: string
 ): Promise<{ liked: boolean; likes: number }> {
   const videoRef = doc(db, COLLECTION_NAME, videoId);
-  const video = await getVideo(videoId);
 
-  if (!video) {
-    throw new Error('Video not found');
-  }
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(videoRef);
+    if (!snap.exists()) {
+      throw new Error('Video not found');
+    }
 
-  const likedBy = video.likedBy || [];
-  const isLiked = likedBy.includes(userId);
+    const video = { id: snap.id, ...(snap.data() as any) } as VideoDocument;
+    const likedBy = video.likedBy || [];
+    const isLiked = likedBy.includes(userId);
 
-  if (isLiked) {
-    // Unlike
-    const newLikedBy = likedBy.filter((id) => id !== userId);
-    await updateDoc(videoRef, {
-      likedBy: newLikedBy,
-      likes: video.likes - 1,
-      updatedAt: Timestamp.now(),
-    });
-    return { liked: false, likes: video.likes - 1 };
-  } else {
-    // Like
+    if (isLiked) {
+      const newLikedBy = likedBy.filter((id) => id !== userId);
+      const nextLikes = Math.max(0, (video.likes || 0) - 1);
+      tx.update(videoRef, {
+        likedBy: newLikedBy,
+        likes: nextLikes,
+        updatedAt: Timestamp.now(),
+      });
+      return { liked: false, likes: nextLikes };
+    }
+
     const newLikedBy = [...likedBy, userId];
-    await updateDoc(videoRef, {
+    const nextLikes = (video.likes || 0) + 1;
+    tx.update(videoRef, {
       likedBy: newLikedBy,
-      likes: video.likes + 1,
+      likes: nextLikes,
       updatedAt: Timestamp.now(),
     });
-    return { liked: true, likes: video.likes + 1 };
-  }
+
+    // Notify the video owner about a new like
+    if (video.userId && video.userId !== userId) {
+      const notifRef = doc(collection(db, 'notifications'));
+      tx.set(notifRef, {
+        title: 'New like',
+        description: video.title ? `Someone liked your video: ${video.title}` : 'Someone liked your video.',
+        type: 'success',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        audience: 'user',
+        userId: video.userId,
+      } as any);
+    }
+    return { liked: true, likes: nextLikes };
+  });
 }
 
 /**

@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import Header from "@/components/layout/Header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
   Heart, 
   Search, 
@@ -12,17 +15,43 @@ import {
   MapPin,
   Settings,
   Video,
-  Play
+  Play,
+  UserPlus
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getUserDocument } from "@/integrations/firebase/users";
 import { Link, useNavigate } from "react-router-dom";
 import VideoPostForm from "@/components/video/VideoPostForm";
+import { subscribeToFavoriteProperties } from "@/integrations/firebase/favorites";
+import { subscribeToRecentSearches } from "@/integrations/firebase/recentSearches";
+import { applyForAgent as createAgentApplication, getAgentApplications } from "@/integrations/firebase/agentApplications";
+import { toast } from "sonner";
+import type { AgentApplicationDocument } from "@/integrations/firebase/types";
 
 const UserDashboard = () => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, role } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<{ full_name: string | null }>({ full_name: null });
+  const [savedProperties, setSavedProperties] = useState<Array<{ title: string; price: string; location: string }>>([]);
+  const [recentSearches, setRecentSearches] = useState<Array<{ query: string; date: string }>>([]);
+
+  useEffect(() => {
+    if (role === 'agent') {
+      navigate('/agent-dashboard', { replace: true });
+    }
+  }, [role, navigate]);
+
+  const [agentApp, setAgentApp] = useState<AgentApplicationDocument | null>(null);
+  const [agentAppLoading, setAgentAppLoading] = useState(false);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applySubmitting, setApplySubmitting] = useState(false);
+  const [applyForm, setApplyForm] = useState({
+    fullName: "",
+    phone: "",
+    company: "",
+    licenseNumber: "",
+    experienceYears: "",
+  });
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -39,13 +68,101 @@ const UserDashboard = () => {
     fetchProfile();
   }, [user]);
 
-  const recentSearches = [
-    { query: '3 bedroom house in Kololo', date: '2 days ago' },
-    { query: 'Land for sale Wakiso', date: '5 days ago' },
-    { query: 'Apartments Ntinda', date: '1 week ago' },
-  ];
+  useEffect(() => {
+    if (!user) {
+      setAgentApp(null);
+      return;
+    }
 
-  const savedProperties: Array<{ title: string; price: string; location: string }> = [];
+    setAgentAppLoading(true);
+    getAgentApplications(user.uid, undefined, 5)
+      .then((apps) => {
+        setAgentApp(apps[0] || null);
+      })
+      .catch((e) => {
+        console.error('Error fetching agent application:', e);
+      })
+      .finally(() => setAgentAppLoading(false));
+  }, [user]);
+
+  const canApply = !!user && role !== 'agent' && agentApp?.status !== 'pending' && agentApp?.status !== 'approved';
+
+  const submitAgentApplication = async () => {
+    if (!user) return;
+    const fullName = applyForm.fullName.trim() || profile.full_name || "";
+    const phone = applyForm.phone.trim();
+    if (!fullName) {
+      toast.error('Please enter your full name');
+      return;
+    }
+    if (!phone) {
+      toast.error('Please enter your phone number');
+      return;
+    }
+
+    const yearsRaw = applyForm.experienceYears.trim();
+    const years = yearsRaw ? Number(yearsRaw) : null;
+    if (yearsRaw && (!Number.isFinite(years) || years < 0)) {
+      toast.error('Experience years must be a valid number');
+      return;
+    }
+
+    setApplySubmitting(true);
+    try {
+      await createAgentApplication(user.uid, {
+        fullName,
+        phone,
+        email: user.email || '',
+        company: applyForm.company.trim() || null,
+        licenseNumber: applyForm.licenseNumber.trim() || null,
+        experienceYears: years === null ? null : years,
+      });
+
+      toast.success('Application submitted');
+      setApplyOpen(false);
+      setApplyForm({ fullName: "", phone: "", company: "", licenseNumber: "", experienceYears: "" });
+
+      const apps = await getAgentApplications(user.uid, undefined, 5);
+      setAgentApp(apps[0] || null);
+    } catch (e: any) {
+      console.error('Error submitting agent application:', e);
+      toast.error(e?.message || 'Failed to submit application');
+    } finally {
+      setApplySubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) {
+      setSavedProperties([]);
+      setRecentSearches([]);
+      return;
+    }
+
+    const unsubFavorites = subscribeToFavoriteProperties(user.uid, (items) => {
+      setSavedProperties(
+        items.slice(0, 3).map((f) => ({
+          title: f.property.title,
+          price: `${f.property.currency} ${f.property.price.toLocaleString()}`,
+          location: `${f.property.location.district}, ${f.property.location.region}`,
+        }))
+      );
+    });
+
+    const unsubSearches = subscribeToRecentSearches(user.uid, (items) => {
+      setRecentSearches(
+        items.map((s) => ({
+          query: s.queryText,
+          date: s.createdAt?.toDate?.().toLocaleString?.() || '',
+        }))
+      );
+    });
+
+    return () => {
+      unsubFavorites();
+      unsubSearches();
+    };
+  }, [user]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-white">
@@ -63,8 +180,118 @@ const UserDashboard = () => {
               <p className="text-white/60 text-xs sm:text-sm mt-1 truncate">{user?.email}</p>
             </div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
+              {user && (
+                <Link to={`/profile/${user.uid}`}>
+                  <Button variant="outline" className="border-white/30 text-white hover:bg-white/10 gap-2 text-xs sm:text-sm">
+                    <Settings className="h-3 w-3 sm:h-4 sm:w-4" />
+                    Profile
+                  </Button>
+                </Link>
+              )}
+
+              <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="hero"
+                    className="gap-2 text-xs sm:text-sm"
+                    disabled={!canApply || agentAppLoading}
+                  >
+                    <UserPlus className="h-3 w-3 sm:h-4 sm:w-4" />
+                    {agentApp?.status === 'approved'
+                      ? 'Agent approved'
+                      : agentApp?.status === 'pending'
+                        ? 'Application pending'
+                        : 'Apply to be Agent'}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-slate-900 border-white/10 text-white max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading text-lg sm:text-xl">Agent Application</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-3">
+                    {agentApp?.status && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-white/70 text-sm">Current status</span>
+                        <Badge variant="outline" className="border-white/20 text-white">
+                          {agentApp.status}
+                        </Badge>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-white/60">Full Name</div>
+                      <Input
+                        value={applyForm.fullName}
+                        onChange={(e) => setApplyForm((p) => ({ ...p, fullName: e.target.value }))}
+                        placeholder={profile.full_name || 'Your full name'}
+                        className="bg-white/5 border-white/20 text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-white/60">Phone</div>
+                      <Input
+                        value={applyForm.phone}
+                        onChange={(e) => setApplyForm((p) => ({ ...p, phone: e.target.value }))}
+                        placeholder="+256..."
+                        className="bg-white/5 border-white/20 text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-white/60">Company (optional)</div>
+                      <Input
+                        value={applyForm.company}
+                        onChange={(e) => setApplyForm((p) => ({ ...p, company: e.target.value }))}
+                        placeholder="Company name"
+                        className="bg-white/5 border-white/20 text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-white/60">License Number (optional)</div>
+                      <Input
+                        value={applyForm.licenseNumber}
+                        onChange={(e) => setApplyForm((p) => ({ ...p, licenseNumber: e.target.value }))}
+                        placeholder="License/registration number"
+                        className="bg-white/5 border-white/20 text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-white/60">Experience Years (optional)</div>
+                      <Input
+                        value={applyForm.experienceYears}
+                        onChange={(e) => setApplyForm((p) => ({ ...p, experienceYears: e.target.value }))}
+                        placeholder="e.g. 3"
+                        className="bg-white/5 border-white/20 text-white"
+                      />
+                    </div>
+
+                    <Button
+                      variant="hero"
+                      className="w-full"
+                      onClick={submitAgentApplication}
+                      disabled={!canApply || applySubmitting}
+                    >
+                      {applySubmitting ? 'Submitting...' : 'Submit Application'}
+                    </Button>
+
+                    <p className="text-xs text-white/50">
+                      After admin approval, your account will become an Agent. Next time you log in, you will see the Agent Dashboard.
+                    </p>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               <VideoPostForm 
-                onSuccess={() => navigate('/explore', { state: { fromUpload: true } })}
+                onSuccess={() => {
+                  // Navigate to Explore after successful upload
+                  setTimeout(() => {
+                    navigate('/explore', { state: { fromUpload: true } });
+                  }, 500);
+                }}
                 triggerLabel="Post Video"
                 triggerClassName="text-xs sm:text-sm"
               />
@@ -162,7 +389,12 @@ const UserDashboard = () => {
                 </div>
               </div>
               <VideoPostForm 
-                onSuccess={() => navigate('/explore', { state: { fromUpload: true } })}
+                onSuccess={() => {
+                  // Navigate to Explore after successful upload
+                  setTimeout(() => {
+                    navigate('/explore', { state: { fromUpload: true } });
+                  }, 500);
+                }}
                 triggerLabel="Post a Video"
                 triggerClassName="whitespace-nowrap"
               />

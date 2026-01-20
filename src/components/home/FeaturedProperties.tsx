@@ -4,33 +4,38 @@ import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import PropertyCard from '@/components/property/PropertyCard';
 import PropertyDetailModal from '@/components/property/PropertyDetailModal';
-import { getProperties } from '@/integrations/firebase/properties';
+import { subscribeToProperties } from '@/integrations/firebase/properties';
 import type { PropertyDocument } from '@/integrations/firebase/properties';
 import { getApprovedAgents } from '@/integrations/firebase/users';
 import { Property } from '@/types/property';
 import type { Agent } from '@/types/property';
 
 const FeaturedProperties = () => {
+  const shuffleSeedRef = useMemo(() => {
+    const raw = sessionStorage.getItem('semkat_home_featured_properties_shuffle_seed');
+    if (raw) {
+      const n = Number(raw);
+      if (!Number.isNaN(n)) return n;
+    }
+    const seed = Date.now();
+    sessionStorage.setItem('semkat_home_featured_properties_shuffle_seed', String(seed));
+    return seed;
+  }, []);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [firestoreProperties, setFirestoreProperties] = useState<PropertyDocument[]>([]);
   const [agentData, setAgentData] = useState<{ [agentId: string]: Agent }>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    const init = async () => {
       try {
-        const [approvedAgents, allProps] = await Promise.all([
-          getApprovedAgents(50),
-          getProperties({ limit: 60 }),
-        ]);
+        const approvedAgents = await getApprovedAgents(50);
+        if (cancelled) return;
 
         const approvedAgentIds = new Set(approvedAgents.map((a) => a.userId));
-        const props = allProps.filter((p) => approvedAgentIds.has(p.agentId));
-
-        const listingCounts = props.reduce<Record<string, number>>((acc, p) => {
-          acc[p.agentId] = (acc[p.agentId] || 0) + 1;
-          return acc;
-        }, {});
 
         const agents: { [agentId: string]: Agent } = {};
         for (const u of approvedAgents) {
@@ -43,23 +48,55 @@ const FeaturedProperties = () => {
             phone: u.profile.phone || '',
             email: u.email,
             rating: 4.5,
-            totalListings: listingCounts[u.userId] || 0,
+            totalListings: 0,
           };
         }
 
         setAgentData(agents);
-        setFirestoreProperties(props);
+
+        unsub = subscribeToProperties({ limit: 60 }, (allProps) => {
+          const props = allProps.filter((p) => approvedAgentIds.has(p.agentId));
+          const listingCounts = props.reduce<Record<string, number>>((acc, p) => {
+            acc[p.agentId] = (acc[p.agentId] || 0) + 1;
+            return acc;
+          }, {});
+
+          setAgentData((prev) => {
+            const next: { [agentId: string]: Agent } = { ...prev };
+            for (const id of Object.keys(next)) {
+              next[id] = { ...next[id], totalListings: listingCounts[id] || 0 };
+            }
+            return next;
+          });
+
+          setFirestoreProperties(props);
+          setLoading(false);
+        });
       } catch (error) {
         console.error('Error fetching featured properties:', error);
-      } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    init();
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, []);
 
   const convertedProperties: Property[] = useMemo(() => {
+    const rankForId = (id: string) => {
+      let h = 2166136261;
+      const s = `${shuffleSeedRef}:${id}`;
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    };
+
     return firestoreProperties
       .map((prop) => ({
         id: prop.id,
@@ -81,8 +118,9 @@ const FeaturedProperties = () => {
         agent: agentData[prop.agentId],
         createdAt: prop.createdAt?.toDate?.().toISOString() || new Date().toISOString(),
       }))
-      .filter((p) => !!p.agent);
-  }, [firestoreProperties, agentData]);
+      .filter((p) => !!p.agent)
+      .sort((a, b) => rankForId(a.id) - rankForId(b.id));
+  }, [firestoreProperties, agentData, shuffleSeedRef]);
 
   const featuredProperties = useMemo(() => {
     const featured = convertedProperties.filter((p) => p.isFeatured);

@@ -12,10 +12,20 @@ import {
   where,
   limit,
   Timestamp,
+  onSnapshot,
   type DocumentData,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './client';
 import type { PropertyType, PropertyStatus } from '@/types/property';
+
+ function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+   const out: Record<string, any> = {};
+   for (const [k, v] of Object.entries(obj)) {
+     if (v !== undefined) out[k] = v;
+   }
+   return out as Partial<T>;
+ }
 
 export interface PropertyDocument {
   id: string;
@@ -147,6 +157,46 @@ export async function getProperties(
   return properties;
 }
 
+export function subscribeToProperties(
+  filters: {
+    type?: PropertyType;
+    status?: PropertyStatus;
+    agentId?: string;
+    limit?: number;
+  } | undefined,
+  callback: (properties: PropertyDocument[]) => void
+): Unsubscribe {
+  const propertiesRef = collection(db, COLLECTION_NAME);
+  let q = query(propertiesRef);
+
+  if (filters?.agentId) {
+    q = query(q, where('agentId', '==', filters.agentId));
+  }
+  if (filters?.type) {
+    q = query(q, where('type', '==', filters.type));
+  }
+  if (filters?.status) {
+    q = query(q, where('status', '==', filters.status));
+  }
+  if (filters?.limit) {
+    q = query(q, limit(filters.limit));
+  }
+
+  return onSnapshot(q, (snapshot) => {
+    const properties = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<PropertyDocument, 'id'>),
+    })) as PropertyDocument[];
+
+    properties.sort((a, b) => {
+      const at = (a.createdAt as any)?.toMillis?.() ?? 0;
+      const bt = (b.createdAt as any)?.toMillis?.() ?? 0;
+      return bt - at;
+    });
+    callback(properties);
+  });
+}
+
 export async function getAgentPropertyCounts(agentId: string): Promise<{
   totalListings: number;
   activeListings: number;
@@ -195,7 +245,7 @@ export async function createProperty(data: CreatePropertyDocument): Promise<stri
   const propertiesRef = collection(db, COLLECTION_NAME);
   // Remove undefined optional fields to avoid Firestore errors
   const sanitized: any = {
-    ...data,
+    ...stripUndefined(data as any),
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };
@@ -210,6 +260,25 @@ export async function createProperty(data: CreatePropertyDocument): Promise<stri
     delete sanitized.installmentPayment;
   }
 
+  // Common optional fields that can be explicitly undefined
+  if (sanitized.bedrooms === undefined) {
+    delete sanitized.bedrooms;
+  }
+  if (sanitized.bathrooms === undefined) {
+    delete sanitized.bathrooms;
+  }
+  if (sanitized.isFeatured === undefined) {
+    delete sanitized.isFeatured;
+  }
+
+  // Nested optional fields
+  if (sanitized.installmentPayment && typeof sanitized.installmentPayment === 'object') {
+    sanitized.installmentPayment = stripUndefined(sanitized.installmentPayment);
+    if (sanitized.installmentPayment.terms === undefined) {
+      delete sanitized.installmentPayment.terms;
+    }
+  }
+
   const docRef = await addDoc(propertiesRef, sanitized);
   return docRef.id;
 }
@@ -222,10 +291,19 @@ export async function updateProperty(
   updates: Partial<CreatePropertyDocument>
 ): Promise<void> {
   const propertyRef = doc(db, COLLECTION_NAME, propertyId);
-  await updateDoc(propertyRef, {
-    ...updates,
+  const payload: any = {
+    ...stripUndefined(updates as any),
     updatedAt: Timestamp.now(),
-  });
+  };
+
+  if (payload.installmentPayment && typeof payload.installmentPayment === 'object') {
+    payload.installmentPayment = stripUndefined(payload.installmentPayment);
+    if (payload.installmentPayment.terms === undefined) {
+      delete payload.installmentPayment.terms;
+    }
+  }
+
+  await updateDoc(propertyRef, payload);
 }
 
 /**

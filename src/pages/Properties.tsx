@@ -12,6 +12,9 @@ import { getProperties } from '@/integrations/firebase/properties';
 import type { PropertyDocument } from '@/integrations/firebase/properties';
 import { getApprovedAgents } from '@/integrations/firebase/users';
 import type { Agent } from '@/types/property';
+import { useAuth } from '@/context/AuthContext';
+import { addRecentSearch } from '@/integrations/firebase/recentSearches';
+import { removeFavoriteProperty, saveFavoriteProperty, subscribeToFavoriteProperties } from '@/integrations/firebase/favorites';
 
 const propertyTypes: { value: PropertyType | 'all'; label: string }[] = [
   { value: 'all', label: 'All Types' },
@@ -33,6 +36,17 @@ const priceRanges = [
 ];
 
 const Properties = () => {
+  const { user } = useAuth();
+  const shuffleSeedRef = useMemo(() => {
+    const raw = sessionStorage.getItem('semkat_properties_shuffle_seed');
+    if (raw) {
+      const n = Number(raw);
+      if (!Number.isNaN(n)) return n;
+    }
+    const seed = Date.now();
+    sessionStorage.setItem('semkat_properties_shuffle_seed', String(seed));
+    return seed;
+  }, []);
   const [searchParams] = useSearchParams();
   const initialType = searchParams.get('type') as PropertyType | null;
   
@@ -46,6 +60,7 @@ const Properties = () => {
   const [firestoreProperties, setFirestoreProperties] = useState<PropertyDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [agentData, setAgentData] = useState<{ [agentId: string]: Agent }>({});
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchProperties = async () => {
@@ -90,8 +105,33 @@ const Properties = () => {
     fetchProperties();
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setFavoriteIds(new Set());
+      return;
+    }
+
+    const unsub = subscribeToFavoriteProperties(user.uid, (items) => {
+      setFavoriteIds(new Set(items.map((i) => i.propertyId)));
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [user]);
+
   // Convert Firestore properties to Property type for compatibility
   const convertedProperties: Property[] = useMemo(() => {
+    const rankForId = (id: string) => {
+      let h = 2166136261;
+      const s = `${shuffleSeedRef}:${id}`;
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    };
+
     return firestoreProperties
       .map(prop => ({
       id: prop.id,
@@ -114,8 +154,9 @@ const Properties = () => {
       agent: agentData[prop.agentId],
       createdAt: prop.createdAt?.toDate?.().toISOString() || new Date().toISOString(),
     }))
-      .filter((p) => !!p.agent);
-  }, [firestoreProperties, agentData]);
+      .filter((p) => !!p.agent)
+      .sort((a, b) => rankForId(a.id) - rankForId(b.id));
+  }, [firestoreProperties, agentData, shuffleSeedRef]);
 
   const filteredProperties = useMemo(() => {
     return convertedProperties.filter((property) => {
@@ -181,19 +222,26 @@ const Properties = () => {
           {/* Search and filters bar */}
           <div className="flex flex-col lg:flex-row gap-4 mb-8">
             {/* Search input */}
-            <div className="relative flex-1">
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search properties..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && user) {
+                    addRecentSearch(user.uid, searchQuery).catch((err) => {
+                      console.error('Failed to save recent search', err);
+                    });
+                  }
+                }}
                 className="w-full h-12 pl-12 pr-4 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
               />
             </div>
 
             {/* Filter toggles */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant={showFilters ? 'default' : 'outline'}
                 onClick={() => setShowFilters(!showFilters)}
@@ -302,14 +350,14 @@ const Properties = () => {
           )}
 
           {/* Results count */}
-          <div className="flex items-center justify-between mb-6">
-            <p className="text-muted-foreground">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <p className="text-muted-foreground min-w-0">
               Showing <span className="font-semibold text-foreground">{filteredProperties.length}</span> properties
             </p>
             
             {/* Active filter badges */}
             {activeFiltersCount > 0 && (
-              <div className="hidden sm:flex gap-2">
+              <div className="hidden sm:flex flex-wrap gap-2 justify-end">
                 {selectedType !== 'all' && (
                   <Badge variant="orange" className="cursor-pointer" onClick={() => setSelectedType('all')}>
                     {selectedType} <X className="h-3 w-3 ml-1" />
@@ -346,6 +394,20 @@ const Properties = () => {
                   <PropertyCard 
                     property={property} 
                     onSelect={setSelectedProperty}
+                    isFavorite={favoriteIds.has(property.id)}
+                    onToggleFavorite={async (p) => {
+                      if (!user) return;
+                      const isFav = favoriteIds.has(p.id);
+                      try {
+                        if (isFav) {
+                          await removeFavoriteProperty(user.uid, p.id);
+                        } else {
+                          await saveFavoriteProperty(user.uid, p);
+                        }
+                      } catch (err) {
+                        console.error('Failed to toggle favorite', err);
+                      }
+                    }}
                   />
                 </div>
               ))}

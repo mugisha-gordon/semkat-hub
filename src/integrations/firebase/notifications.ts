@@ -1,5 +1,6 @@
 import {
   collection,
+  addDoc,
   doc,
   getDoc,
   getDocs,
@@ -8,7 +9,10 @@ import {
   orderBy,
   limit,
   updateDoc,
+  serverTimestamp,
   Timestamp,
+  onSnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './client';
 
@@ -29,6 +33,28 @@ export interface NotificationDocument {
 }
 
 const COLLECTION_NAME = 'notifications';
+
+export async function createNotification(input: {
+  title: string;
+  description: string;
+  type: NotificationType;
+  audience: 'all' | 'user';
+  userId?: string;
+}): Promise<string> {
+  const ref = collection(db, COLLECTION_NAME);
+  const payload: any = {
+    title: input.title,
+    description: input.description,
+    type: input.type,
+    audience: input.audience,
+    userId: input.audience === 'user' ? input.userId : undefined,
+    createdAt: serverTimestamp() as unknown as Timestamp,
+    updatedAt: serverTimestamp() as unknown as Timestamp,
+  };
+  if (payload.userId === undefined) delete payload.userId;
+  const r = await addDoc(ref, payload);
+  return r.id;
+}
 
 export async function getNotificationsForUser(userId: string, options?: { limit?: number }): Promise<NotificationDocument[]> {
   const ref = collection(db, COLLECTION_NAME);
@@ -63,4 +89,50 @@ export async function markNotificationAsRead(notificationId: string): Promise<vo
     readAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
+}
+
+export function subscribeToNotificationsForUser(
+  userId: string,
+  callback: (notifications: NotificationDocument[]) => void,
+  options?: { limit?: number }
+): Unsubscribe {
+  const ref = collection(db, COLLECTION_NAME);
+  const max = options?.limit ?? 50;
+
+  const qUser = query(ref, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(max));
+  const qAll = query(ref, where('audience', '==', 'all'), orderBy('createdAt', 'desc'), limit(max));
+
+  let userItems: NotificationDocument[] = [];
+  let allItems: NotificationDocument[] = [];
+
+  const emit = () => {
+    const byId = new Map<string, NotificationDocument>();
+    for (const item of [...userItems, ...allItems]) {
+      byId.set(item.id, item);
+    }
+    callback(
+      Array.from(byId.values()).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
+    );
+  };
+
+  const unsubUser = onSnapshot(qUser, (snapshot) => {
+    userItems = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<NotificationDocument, 'id'>),
+    }));
+    emit();
+  });
+
+  const unsubAll = onSnapshot(qAll, (snapshot) => {
+    allItems = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<NotificationDocument, 'id'>),
+    }));
+    emit();
+  });
+
+  return () => {
+    unsubUser();
+    unsubAll();
+  };
 }

@@ -1,6 +1,21 @@
 import { ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from './client';
 
+ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+   return new Promise<T>((resolve, reject) => {
+     const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+     promise
+       .then((value) => {
+         clearTimeout(timer);
+         resolve(value);
+       })
+       .catch((err) => {
+         clearTimeout(timer);
+         reject(err);
+       });
+   });
+ }
+
 /**
  * Upload a video file to Firebase Storage
  */
@@ -22,63 +37,90 @@ export async function uploadVideo(
     throw new Error('Video file size must be less than 200MB');
   }
 
-  // Generate unique filename
+  // Generate unique filename - sanitize filename to avoid issues
   const timestamp = Date.now();
-  const filename = `videos/${userId}/${timestamp}_${file.name}`;
+  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const filename = `videos/${userId}/${timestamp}_${sanitizedName}`;
   const videoRef = ref(storage, filename);
 
   try {
-    // Upload video with resumable upload for better reliability
-    const uploadTask = uploadBytesResumable(videoRef, file, {
-      contentType: file.type || 'video/mp4',
-    });
+    const attemptResumable = async () => {
+      const uploadTask = uploadBytesResumable(videoRef, file, {
+        contentType: file.type || 'video/mp4',
+      });
 
-    await new Promise<void>((resolve, reject) => {
-      let uploadCompleted = false;
-      
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          // Calculate progress
-          const progress = snapshot.totalBytes
-            ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-            : 0;
-          options?.onProgress?.(progress, snapshot.bytesTransferred);
-          
-          // Check if upload is complete
-          if (snapshot.state === 'success') {
-            uploadCompleted = true;
-          }
-        },
-        (error) => {
-          // Handle upload errors
-          console.error('Upload error:', error);
-          uploadCompleted = false;
-          reject(error);
-        },
-        async () => {
-          // Upload completed successfully
+      await new Promise<void>((resolve, reject) => {
+        const totalTimeoutMs = 10 * 60 * 1000;
+        const idleTimeoutMs = 45 * 1000;
+
+        let totalTimer: any;
+        let idleTimer: any;
+
+        const clearTimers = () => {
+          if (totalTimer) clearTimeout(totalTimer);
+          if (idleTimer) clearTimeout(idleTimer);
+        };
+
+        const fail = (err: any) => {
+          clearTimers();
           try {
-            // Ensure progress is set to 100%
-            options?.onProgress?.(100, file.size);
-            
-            // Wait a moment to ensure upload is fully complete
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Verify upload task is complete
-            if (uploadTask.snapshot.state === 'success') {
-              uploadCompleted = true;
-              resolve();
-            } else {
-              throw new Error(`Upload state is ${uploadTask.snapshot.state}, expected 'success'`);
-            }
-          } catch (error: any) {
-            console.error('Error in upload completion:', error);
-            reject(error);
+            uploadTask.cancel();
+          } catch {
+            // ignore
           }
-        }
+          reject(err);
+        };
+
+        const resetIdle = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            fail(new Error('Upload stalled. Please check your connection and try again.'));
+          }, idleTimeoutMs);
+        };
+
+        totalTimer = setTimeout(() => {
+          fail(new Error('Upload timed out. Please try again.'));
+        }, totalTimeoutMs);
+
+        resetIdle();
+        options?.onProgress?.(0, 0);
+
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            resetIdle();
+            const progress = snapshot.totalBytes
+              ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+              : 0;
+            options?.onProgress?.(progress, snapshot.bytesTransferred);
+          },
+          (error) => {
+            console.error('Upload error:', error);
+            fail(error);
+          },
+          () => {
+            clearTimers();
+            options?.onProgress?.(100, file.size);
+            resolve();
+          }
+        );
+      });
+    };
+
+    try {
+      await attemptResumable();
+    } catch (resumableError: any) {
+      const msg = String(resumableError?.message || resumableError);
+      console.warn('Resumable upload failed, falling back to non-resumable uploadBytes:', resumableError);
+      options?.onProgress?.(0, 0);
+      await withTimeout(
+        uploadBytes(videoRef, file, { contentType: file.type || 'video/mp4' }),
+        10 * 60 * 1000,
+        'Upload timed out. Please try again.'
       );
-    });
+      options?.onProgress?.(100, file.size);
+      void msg;
+    }
 
     // Get download URL after upload completes
     // Add small delay to ensure upload is fully processed
@@ -89,7 +131,11 @@ export async function uploadVideo(
     
     while (retries > 0) {
       try {
-        videoUrl = await getDownloadURL(videoRef);
+        videoUrl = await withTimeout(
+          getDownloadURL(videoRef),
+          30 * 1000,
+          'Failed to get video URL. Please try again.'
+        );
         if (videoUrl && videoUrl.length > 0) {
           break;
         }
@@ -126,17 +172,55 @@ export async function uploadImage(
     throw new Error('File must be an image');
   }
 
-  // Validate file size (max 10MB)
-  const maxSize = 10 * 1024 * 1024; // 10MB
+  // Validate file size (max 50MB)
+  const maxSize = 50 * 1024 * 1024; // 50MB
   if (file.size > maxSize) {
-    throw new Error('Image file size must be less than 10MB');
+    throw new Error('Image file size must be less than 50MB');
   }
 
   const imageRef = ref(storage, path);
 
   try {
-    await uploadBytes(imageRef, file);
-    const imageUrl = await getDownloadURL(imageRef);
+    // Upload with explicit contentType (required by storage.rules contentType matcher)
+    // Add a timeout + a few retries for flaky networks
+    let uploadRetries = 3;
+    while (uploadRetries > 0) {
+      try {
+        await withTimeout(
+          uploadBytes(imageRef, file, { contentType: file.type || 'image/jpeg' }),
+          2 * 60 * 1000,
+          'Image upload timed out. Please try again.'
+        );
+        break;
+      } catch (error: any) {
+        uploadRetries--;
+        if (uploadRetries === 0) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    // Retry download URL retrieval (sometimes immediate read can race)
+    let imageUrl: string | null = null;
+    let urlRetries = 3;
+    while (urlRetries > 0) {
+      try {
+        imageUrl = await withTimeout(
+          getDownloadURL(imageRef),
+          30 * 1000,
+          'Failed to get image URL. Please try again.'
+        );
+        if (imageUrl && imageUrl.length > 0) break;
+      } catch (error: any) {
+        urlRetries--;
+        if (urlRetries === 0) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    if (!imageUrl) {
+      throw new Error('Failed to get image download URL after upload');
+    }
+
     return imageUrl;
   } catch (error: any) {
     console.error('Error uploading image:', error);
@@ -149,6 +233,8 @@ export async function uploadImage(
  */
 export async function deleteFile(fileUrl: string): Promise<void> {
   try {
+    // The Firebase v9 `ref` function supports full URLs (including download URLs)
+    // as well as relative storage paths.
     const fileRef = ref(storage, fileUrl);
     await deleteObject(fileRef);
   } catch (error: any) {

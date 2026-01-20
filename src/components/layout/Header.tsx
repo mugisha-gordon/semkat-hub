@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Menu, X, MapPin, Phone, User, Heart, Bell, LayoutDashboard, LogOut } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Menu, X, MapPin, Phone, User, Heart, Bell, LayoutDashboard, LogOut, ChevronLeft, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { subscribeToUserDocument } from '@/integrations/firebase/users';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +17,31 @@ import {
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { user, role, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [fullName, setFullName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setAvatarUrl(null);
+      setFullName(null);
+      return;
+    }
+
+    const unsub = subscribeToUserDocument(user.uid, (doc) => {
+      setAvatarUrl(doc?.profile?.avatarUrl || null);
+      setFullName(doc?.profile?.fullName || null);
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [user]);
+
+  const initials = useMemo(() => {
+    const s = (fullName || user?.email || 'U').trim();
+    return s.slice(0, 1).toUpperCase();
+  }, [fullName, user?.email]);
 
   const navLinks = [
     { label: 'Explore', href: '/explore' },
@@ -34,6 +61,22 @@ const Header = () => {
       default:
         return '/dashboard';
     }
+  };
+
+  const handleBack = () => {
+    // Try to go back within SPA history.
+    // If there is no previous entry, fallback to a sensible landing.
+    if (window.history.state?.idx != null && window.history.state.idx > 0) {
+      navigate(-1);
+      return;
+    }
+
+    if (user) {
+      navigate(getDashboardLink());
+      return;
+    }
+
+    navigate('/explore');
   };
 
   return (
@@ -69,25 +112,39 @@ const Header = () => {
 
       {/* Main header */}
       <div className="container flex h-16 items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="flex items-center justify-center h-14 w-14  shadow-md">
-            <img 
-              src="/LOGO.png" 
-              alt="Semkat Group Uganda Limited" 
-              className="h-10 w-10 object-contain"
-              onError={(e) => {
-                // Fallback if SVG doesn't load
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-heading text-lg font-bold text-foreground leading-tight">
-              Semkat Group
-            </span>
-            <span className="text-xs text-muted-foreground">Uganda Limited</span>
-          </div>
-        </Link>
+        <div className="flex items-center gap-2 min-w-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={handleBack}
+            aria-label="Back"
+            title="Back"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+
+          <Link to="/" className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center justify-center h-14 w-14  shadow-md">
+              <img 
+                src="/LOGO.png" 
+                alt="Semkat Group Uganda Limited" 
+                className="h-10 w-10 object-contain"
+                onError={(e) => {
+                  // Fallback if SVG doesn't load
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="font-heading text-lg font-bold text-foreground leading-tight truncate">
+                Semkat App
+              </span>
+              <span className="text-xs text-muted-foreground truncate">to the end...</span>
+            </div>
+          </Link>
+        </div>
 
         {/* Desktop navigation */}
         <nav className="hidden lg:flex items-center gap-1">
@@ -108,7 +165,10 @@ const Header = () => {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
-                  <User className="h-5 w-5" />
+                  <Avatar className="h-9 w-9">
+                    <AvatarImage src={avatarUrl || undefined} />
+                    <AvatarFallback className="bg-muted text-foreground text-xs">{initials}</AvatarFallback>
+                  </Avatar>
                   {role && (
                     <span className={cn(
                       "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-background",
@@ -118,6 +178,18 @@ const Header = () => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem asChild>
+                  <Link to={`/profile/${user.uid}`} className="flex items-center gap-2 cursor-pointer">
+                    <User className="h-4 w-4" />
+                    View Profile
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/messages" className="flex items-center gap-2 cursor-pointer">
+                    <MessageCircle className="h-4 w-4" />
+                    Messages
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link to={getDashboardLink()} className="flex items-center gap-2 cursor-pointer">
                     <LayoutDashboard className="h-4 w-4" />

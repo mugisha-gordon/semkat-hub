@@ -9,8 +9,11 @@ import {
   query,
   where,
   limit,
+  orderBy,
   Timestamp,
   serverTimestamp,
+  onSnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './client';
 import type {
@@ -38,6 +41,16 @@ export async function getUserDocument(
   }
   
   return userSnap.data() as UserDocument;
+}
+
+export function subscribeToUserDocument(
+  userId: string,
+  callback: (doc: UserDocument | null) => void
+): Unsubscribe {
+  const userRef = doc(db, COLLECTION_NAME, userId);
+  return onSnapshot(userRef, (snap) => {
+    callback(snap.exists() ? (snap.data() as UserDocument) : null);
+  });
 }
 
 /**
@@ -84,7 +97,16 @@ export async function updateUserDocument(
   
   // Handle profile updates separately to update updatedAt
   if (updates.profile) {
-    updates.profile.updatedAt = Timestamp.now();
+    const profileUpdates = { ...updates.profile, updatedAt: Timestamp.now() };
+    const patch: Record<string, any> = {};
+
+    for (const [k, v] of Object.entries(profileUpdates)) {
+      patch[`profile.${k}`] = v;
+    }
+
+    const { profile, ...rest } = updates as any;
+    await updateDoc(userRef, { ...rest, ...patch } as any);
+    return;
   }
   
   await updateDoc(userRef, updates as any);
@@ -156,11 +178,11 @@ export async function getAllUsers(): Promise<UserDocument[]> {
 }
 
 /**
- * Get all agents
+ * Get all agents (admin only)
  */
 export async function getAllAgents(limitCount?: number): Promise<UserDocument[]> {
   const usersRef = collection(db, COLLECTION_NAME);
-  let q = query(usersRef, where('role', 'in', ['agent', 'admin']));
+  let q = query(usersRef, where('role', '==', 'agent'));
   if (limitCount) {
     q = query(q, limit(limitCount));
   }
@@ -170,6 +192,21 @@ export async function getAllAgents(limitCount?: number): Promise<UserDocument[]>
     userId: doc.id,
     ...doc.data(),
   })) as UserDocument[];
+}
+
+/**
+ * Subscribe to agents in real-time.
+ * callback receives an array of UserDocument.
+ */
+export function subscribeToAgents(callback: (agents: UserDocument[]) => void, limitCount?: number) {
+  const usersRef = collection(db, COLLECTION_NAME);
+  let q = query(usersRef, where('role', '==', 'agent'));
+  if (limitCount) q = query(q, limit(limitCount));
+  const unsub = onSnapshot(q, (snap) => {
+    const agents = snap.docs.map((d) => ({ userId: d.id, ...(d.data() as any) })) as UserDocument[];
+    callback(agents);
+  });
+  return unsub;
 }
 
 /**
@@ -189,6 +226,14 @@ export async function getApprovedAgents(limitCount?: number): Promise<UserDocume
   })) as UserDocument[];
 
   return users.filter((u) => !!u.roles?.agent);
+}
+
+export async function getUserIdByEmail(email: string): Promise<string | null> {
+  const usersRef = collection(db, COLLECTION_NAME);
+  const q = query(usersRef, where('email', '==', email), limit(1));
+  const snap = await getDocs(q);
+  const first = snap.docs[0];
+  return first ? first.id : null;
 }
 
 /**

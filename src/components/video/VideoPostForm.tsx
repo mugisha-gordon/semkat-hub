@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { createVideo } from "@/integrations/firebase/videos";
-import { uploadVideo } from "@/integrations/firebase/storage";
+import { uploadVideo, deleteFile } from "@/integrations/firebase/storage";
 import { Plus, Video, Upload, X, Zap, CheckCircle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { compressVideo, shouldCompressVideo } from "@/utils/videoCompression";
@@ -139,37 +139,164 @@ const VideoPostForm = ({
       return;
     }
 
+    // Validate form fields
+    if (!formData.title.trim()) {
+      toast.error("Please enter a title for your video");
+      return;
+    }
+
+    if (!formData.location.trim()) {
+      toast.error("Please enter a location for your video");
+      return;
+    }
+
     setStage('uploading');
     setUploadProgress(0);
     uploadStartTime.current = Date.now();
     lastBytesTransferred.current = 0;
 
+    let videoUrl: string | null = null;
+    let uploadSuccess = false;
+
     try {
-      // Upload video to Firebase Storage with progress tracking
-      const { videoUrl } = await uploadVideo(videoFile, user.uid, {
-        onProgress: (p, bytesTransferred) => {
-          setUploadProgress(p);
-          if (bytesTransferred) {
-            calculateUploadSpeed(bytesTransferred);
-          }
-        },
+      console.log('🚀 Starting video upload...', { 
+        fileName: videoFile.name, 
+        fileSize: videoFile.size, 
+        fileType: videoFile.type,
+        userId: user.uid 
       });
 
-      // Create video document in Firestore
+      // Upload video to Firebase Storage with progress tracking
+      // Retry logic for upload failures
+      let uploadAttempts = 0;
+      const maxUploadAttempts = 3;
+      
+      while (uploadAttempts < maxUploadAttempts && !uploadSuccess) {
+        try {
+          uploadAttempts++;
+          console.log(`📤 Upload attempt ${uploadAttempts}/${maxUploadAttempts}`);
+          
+          if (uploadAttempts > 1) {
+            toast.info(`Retrying upload... (Attempt ${uploadAttempts}/${maxUploadAttempts})`);
+            setUploadProgress(0);
+            uploadStartTime.current = Date.now();
+            lastBytesTransferred.current = 0;
+          }
+
+          const result = await uploadVideo(videoFile, user.uid, {
+            onProgress: (p, bytesTransferred) => {
+              // Ensure progress is always between 0-100
+              const progress = Math.min(100, Math.max(0, p));
+              setUploadProgress(progress);
+              if (progress % 10 === 0 || progress === 100) {
+                console.log(`📊 Upload progress: ${progress.toFixed(1)}%`, { bytesTransferred });
+              }
+              if (bytesTransferred) {
+                calculateUploadSpeed(bytesTransferred);
+              }
+            },
+          });
+
+          console.log('✅ Upload successful!', { videoUrl: result.videoUrl });
+          videoUrl = result.videoUrl;
+          uploadSuccess = true;
+        } catch (uploadError: any) {
+          console.error(`❌ Upload attempt ${uploadAttempts} failed:`, uploadError);
+          console.error('Error details:', {
+            code: uploadError?.code,
+            message: uploadError?.message,
+            stack: uploadError?.stack
+          });
+          
+          if (uploadAttempts >= maxUploadAttempts) {
+            throw uploadError;
+          }
+          
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * uploadAttempts));
+        }
+      }
+
+      if (!videoUrl) {
+        throw new Error("Failed to get video URL after upload");
+      }
+
+      // Ensure progress shows 100% before moving to next stage
+      setUploadProgress(100);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Create video document in Firestore with retry logic
       setStage('creating');
-      await createVideo({
+      let videoId: string | null = null;
+      let createAttempts = 0;
+      const maxCreateAttempts = 3;
+
+      console.log('Creating video document in Firestore...', {
         userId: user.uid,
-        title: formData.title,
-        location: formData.location,
+        title: formData.title.trim(),
+        location: formData.location.trim(),
         videoUrl: videoUrl,
-        description: formData.description || undefined,
-        role: (role === "agent" || role === "admin" ? "agent" : "user") as "agent" | "user",
+        role: (role === "agent" || role === "admin" ? "agent" : "user")
       });
+
+      while (createAttempts < maxCreateAttempts && !videoId) {
+        try {
+          createAttempts++;
+          console.log(`Firestore create attempt ${createAttempts}/${maxCreateAttempts}`);
+          
+          if (createAttempts > 1) {
+            toast.info(`Retrying save... (Attempt ${createAttempts}/${maxCreateAttempts})`);
+          }
+
+          videoId = await createVideo({
+            userId: user.uid,
+            title: formData.title.trim(),
+            location: formData.location.trim(),
+            videoUrl: videoUrl,
+            description: formData.description?.trim() || undefined,
+            role: (role === "agent" || role === "admin" ? "agent" : "user") as "agent" | "user",
+          });
+
+          console.log('Video document created successfully!', { videoId });
+
+          if (!videoId) {
+            throw new Error("Video document was not created");
+          }
+        } catch (createError: any) {
+          console.error(`Create attempt ${createAttempts} failed:`, createError);
+          console.error('Create error details:', {
+            code: createError?.code,
+            message: createError?.message,
+            stack: createError?.stack
+          });
+          
+          if (createAttempts >= maxCreateAttempts) {
+            // If Firestore creation fails, try to clean up uploaded video
+            if (videoUrl) {
+              try {
+                console.log('Cleaning up uploaded video due to Firestore failure...');
+                await deleteFile(videoUrl);
+              } catch (deleteError) {
+                console.error("Failed to clean up uploaded video:", deleteError);
+              }
+            }
+            throw createError;
+          }
+          
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * createAttempts));
+        }
+      }
+
+      if (!videoId) {
+        throw new Error("Failed to create video document");
+      }
 
       setStage('complete');
-      toast.success("Video posted successfully!");
+      console.log('🎉 Video upload and creation complete!', { videoId });
+      toast.success("Video posted successfully! It will appear in Explore shortly.");
       
-      // Small delay to show complete state
+      // Wait to ensure Firestore updates propagate
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       setOpen(false);
@@ -182,21 +309,32 @@ const VideoPostForm = ({
       setStage('idle');
       setUploadProgress(0);
       setUploadSpeed('');
-      onSuccess?.();
+      
+      // Call success callback
+      if (onSuccess) {
+        console.log('🔄 Calling onSuccess callback...');
+        onSuccess();
+      }
     } catch (error: any) {
       console.error("Error posting video:", error);
       const code = error?.code ? ` (${error.code})` : "";
       let message = error?.message || "Failed to post video";
       
       // Provide user-friendly error messages
-      if (error?.code === 'storage/unauthorized') {
+      if (error?.code === 'storage/unauthorized' || error?.code === 'permission-denied') {
         message = "You don't have permission to upload videos. Please check your account.";
       } else if (error?.code === 'storage/quota-exceeded') {
         message = "Storage quota exceeded. Please contact support.";
       } else if (error?.code === 'storage/canceled') {
         message = "Upload was canceled. Please try again.";
-      } else if (message.includes('network') || message.includes('Network')) {
+      } else if (error?.code === 'storage/object-not-found') {
+        message = "Uploaded file not found. Please try again.";
+      } else if (error?.code === 'unavailable' || message.includes('network') || message.includes('Network') || message.includes('fetch')) {
         message = "Network error. Please check your connection and try again.";
+      } else if (message.includes('Missing required fields')) {
+        message = "Please fill in all required fields.";
+      } else if (message.includes('Invalid role')) {
+        message = "Account error. Please try logging out and back in.";
       }
       
       toast.error(`${message}${code}`);
@@ -205,7 +343,7 @@ const VideoPostForm = ({
       setUploadSpeed('');
       
       // Keep the file and preview for retry if upload failed
-      // Don't remove video file so user can retry
+      // Don't remove video file so user can retry without reselecting
     }
   };
 
@@ -217,8 +355,14 @@ const VideoPostForm = ({
       }
     }}>
       <DialogTrigger asChild>
-        <Button variant={triggerVariant} size={triggerSize} className={`gap-2 ${triggerClassName}`}>
-          <Plus className="h-4 w-4" />
+        <Button 
+          variant={triggerVariant} 
+          size={triggerSize} 
+          className={`gap-2 ${triggerClassName}`}
+          disabled={!user}
+          title={!user ? "Please log in to post videos" : "Post a video"}
+        >
+          <Plus className="h-6 w-6" />
           {triggerLabel}
         </Button>
       </DialogTrigger>

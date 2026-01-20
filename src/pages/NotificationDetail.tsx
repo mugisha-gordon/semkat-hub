@@ -50,7 +50,7 @@ const NotificationDetail = () => {
       <main className="flex-1 pb-12">
         <section className="relative overflow-hidden py-10">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,hsl(var(--semkat-orange)/0.2),transparent_40%),radial-gradient(circle_at_80%_10%,hsl(var(--semkat-sky)/0.2),transparent_35%)]" />
-          <div className="container relative flex items-center justify-between gap-4">
+          <div className="container relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="h-12 w-12 rounded-2xl bg-semkat-sky-light backdrop-blur flex items-center justify-center border border-semkat-sky/20">
                 <Bell className="h-6 w-6 text-secondary" />
@@ -92,8 +92,8 @@ const NotificationDetail = () => {
             </Card>
           ) : (
             <Card className="bg-card border p-6 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   {(() => {
                     const meta = typeMeta[item.type] || typeMeta.info;
                     const Icon = meta.icon;
@@ -102,7 +102,7 @@ const NotificationDetail = () => {
                         <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center">
                           <Icon className="h-5 w-5" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <h2 className="font-heading text-xl font-semibold text-foreground">{item.title}</h2>
                           <p className="text-muted-foreground text-sm">
                             {item.createdAt?.toDate?.().toLocaleString?.() || ""}

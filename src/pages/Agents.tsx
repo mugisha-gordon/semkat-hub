@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Star, MapPin, Building } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card } from '@/components/ui/card';
@@ -31,11 +32,12 @@ const Agents = () => {
 
         const mapped = approvedAgents.map((u) => ({
           id: u.userId,
-          name: u.profile.fullName || 'Agent',
+          name: u.profile?.fullName || u.email || 'Agent',
           avatar:
-            u.profile.avatarUrl ||
-            'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-          phone: u.profile.phone || '',
+            u.profile?.avatarUrl ||
+            (u as any)?.avatarUrl ||
+            '',
+          phone: u.profile?.phone || '',
           email: u.email,
           rating: 4.5,
           totalListings: listingCounts[u.userId] || 0,
@@ -109,19 +111,30 @@ const Agents = () => {
                     {/* Header with avatar */}
                     <div className="relative h-32 bg-gradient-hero">
                       <div className="absolute -bottom-12 left-1/2 -translate-x-1/2">
-                        <img
-                          src={agent.avatar}
-                          alt={agent.name}
-                          className="w-24 h-24 rounded-full object-cover ring-4 ring-background shadow-lg"
-                        />
+                        <Link to={`/profile/${agent.id}`} className="block">
+                          {agent.avatar ? (
+                            <img
+                              src={agent.avatar}
+                              alt={agent.name}
+                              className="w-24 h-24 rounded-full object-cover ring-4 ring-background shadow-lg"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-24 h-24 rounded-full ring-4 ring-background shadow-lg bg-muted" />
+                          )}
+                        </Link>
                       </div>
                     </div>
 
                     {/* Content */}
                     <div className="pt-14 pb-6 px-6 text-center">
-                      <h3 className="font-heading text-lg font-semibold text-foreground mb-1">
-                        {agent.name}
-                      </h3>
+                      <Link to={`/profile/${agent.id}`} className="inline-block">
+                        <h3 className="font-heading text-lg font-semibold text-foreground mb-1 hover:underline">
+                          {agent.name}
+                        </h3>
+                      </Link>
                       <p className="text-sm text-muted-foreground mb-3">Real Estate Consultant</p>
                       
                       {/* Rating */}

@@ -42,7 +42,7 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
     sizeValue: "",
     sizeUnit: "acres" as "acres" | "sqft" | "sqm" | "hectares",
     description: "",
-    images: "" as string, // Comma-separated URLs (can mix uploaded and manual URLs)
+    images: "" as string, // Deprecated (device uploads only)
     illustration2D: "", // URL for 2D floor plan
     illustration3D: "", // URL for 3D virtual tour/panorama
     features: "" as string, // Comma-separated
@@ -63,11 +63,11 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
       return;
     }
 
-    // Validate file sizes
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Validate file sizes (max 50MB)
+    const maxSize = 50 * 1024 * 1024; // 50MB
     const oversizedFiles = imageFiles.filter(file => file.size > maxSize);
     if (oversizedFiles.length > 0) {
-      toast.error(`Some images exceed 10MB limit: ${oversizedFiles.map(f => f.name).join(', ')}`);
+      toast.error(`Some images exceed 50MB limit: ${oversizedFiles.map(f => f.name).join(', ')}`);
       return;
     }
 
@@ -98,18 +98,7 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
 
       if (urls.length > 0) {
         setUploadedImages(prev => [...prev, ...urls]);
-        
-        // Add uploaded URLs to form data (don't overwrite manual URLs)
-        const existingUrls = formData.images 
-          .split(",")
-          .map(u => u.trim())
-          .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')));
-        
-        setFormData(prev => ({
-          ...prev,
-          images: [...existingUrls, ...urls].join(", ")
-        }));
-        
+
         toast.success(`${urls.length} image(s) uploaded successfully`);
       } else {
         toast.error("No images were uploaded. Please try again.");
@@ -130,15 +119,7 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
   };
 
   const handleRemoveImage = (index: number) => {
-    setUploadedImages(prev => {
-      const newImages = prev.filter((_, i) => i !== index);
-      // Also update form data to remove from combined list
-      const allImages = formData.images.split(",").map(u => u.trim()).filter(u => u);
-      const toRemove = prev[index];
-      const updatedImages = allImages.filter(img => img !== toRemove);
-      setFormData(prevData => ({ ...prevData, images: updatedImages.join(", ") }));
-      return newImages;
-    });
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
   };
 
   const handle2DIllustrationUpload = async (file: File) => {
@@ -186,21 +167,10 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
       }
 
       // Combine uploaded images with manually entered URLs
-      const uploadedUrls = uploadedImages;
-      // Parse manual URLs (those that start with http/https)
-      const manualUrls = formData.images
-        .split(",")
-        .map((url) => url.trim())
-        .filter((url) => url.length > 0 && (url.startsWith('http://') || url.startsWith('https://')));
-
-      // Combine both, removing duplicates
-      const allImages = [
-        ...uploadedUrls,
-        ...manualUrls.filter(url => !uploadedUrls.includes(url))
-      ];
+      const allImages = uploadedImages;
 
       if (allImages.length === 0) {
-        toast.error("Please provide at least one image (upload files or enter image URLs)");
+        toast.error("Please upload at least one image");
         setLoading(false);
         return;
       }
@@ -542,7 +512,7 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
                 <span className="text-white/70 text-sm">
                   {uploadingImages ? "Uploading..." : "Click to upload images"}
                 </span>
-                <span className="text-xs text-white/50">JPG, PNG, WebP (Max 10MB each)</span>
+                <span className="text-xs text-white/50">JPG, PNG, WebP (Max 50MB each)</span>
               </label>
               {uploadingImages && (
                 <div className="mt-4 space-y-2">
@@ -570,18 +540,6 @@ const PropertyPostForm = ({ agentId, onSuccess }: PropertyPostFormProps) => {
                 ))}
               </div>
             )}
-
-            {/* Manual Image URLs (optional) */}
-            <div className="space-y-2">
-              <Label>Or add image URLs manually (comma-separated)</Label>
-              <Input
-                value={formData.images}
-                onChange={(e) => setFormData({ ...formData, images: e.target.value })}
-                placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
-                className="bg-white/5 border-white/20"
-              />
-              <p className="text-xs text-white/50">Enter image URLs separated by commas (optional if uploading files)</p>
-            </div>
           </div>
 
           {/* 2D Illustration (Floor Plan) */}

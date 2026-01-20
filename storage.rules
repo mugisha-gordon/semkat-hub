@@ -2,50 +2,39 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Videos - authenticated users can upload to their own folder
-    match /videos/{userId}/{allPaths=**} {
-      // Users can read all videos (public access)
-      allow read: if true;
-      
-      // Users can write to their own folder (upload videos)
-      allow write: if request.auth != null && 
-                     request.auth.uid == userId &&
-                     request.resource.size < 200 * 1024 * 1024 && // 200MB max
-                     request.resource.contentType.matches('video/.*');
-      
-      // Users can delete their own videos
-      allow delete: if request.auth != null && 
-                      request.auth.uid == userId;
+    function isBootstrapAdmin() {
+      return request.auth != null &&
+             request.auth.token.email != null &&
+             request.auth.token.email == 'adminsemkat@gmail.com';
     }
-    
-    // Images - authenticated users can upload
-    match /images/{allPaths=**} {
-      // Users can read all images (public access)
+
+    // Public reads for media
+    match /avatars/{userId}/{allPaths=**} {
       allow read: if true;
-      
-      // Authenticated users can upload images
       allow write: if request.auth != null &&
-                     request.resource.size < 10 * 1024 * 1024 && // 10MB max
-                     request.resource.contentType.matches('image/.*');
-      
-      // Users can delete their own images
-      allow delete: if request.auth != null;
+                   request.auth.uid == userId &&
+                   request.resource.size < 50 * 1024 * 1024 &&
+                   request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && (request.auth.uid == userId || isBootstrapAdmin());
     }
-    
-    // Property images - agents can upload
+
     match /properties/{allPaths=**} {
-      // Everyone can read property images
       allow read: if true;
-      
-      // Authenticated users can upload property images
       allow write: if request.auth != null &&
-                     request.resource.size < 10 * 1024 * 1024 && // 10MB max
-                     request.resource.contentType.matches('image/.*');
-      
-      // Users can delete their own uploads
+                   request.resource.size < 50 * 1024 * 1024 &&
+                   request.resource.contentType.matches('image/.*');
       allow delete: if request.auth != null;
     }
-    
+
+    match /videos/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null &&
+                   request.auth.uid == userId &&
+                   request.resource.size < 200 * 1024 * 1024 &&
+                   request.resource.contentType.matches('video/.*');
+      allow delete: if request.auth != null && (request.auth.uid == userId || isBootstrapAdmin());
+    }
+
     // Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;

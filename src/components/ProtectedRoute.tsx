@@ -7,7 +7,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
-  const { user, loading, role } = useAuth();
+  const { user, loading, role, error } = useAuth();
   const location = useLocation();
 
   // Hard-coded admin email check
@@ -26,6 +26,21 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
+        <div className="text-center max-w-md">
+          <p className="text-red-200 text-sm bg-red-500/10 border border-red-500/30 rounded p-3">
+            {error}
+          </p>
+          <div className="mt-4">
+            <Navigate to="/auth" state={{ from: location.pathname }} replace />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return <Navigate to="/auth" state={{ from: location.pathname }} replace />;
   }
@@ -33,6 +48,16 @@ const ProtectedRoute = ({ children, requireRole }: ProtectedRouteProps) => {
   // If a specific role is required, check for it
   // Admin can access everything (including agent dashboard)
   if (requireRole) {
+    if (!effectiveRole) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-semkat-orange border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-white/60">Loading dashboard...</p>
+          </div>
+        </div>
+      );
+    }
     if (effectiveRole === 'admin' || isAdminEmail) {
       return <>{children}</>;
     }

@@ -15,6 +15,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './client';
+import { createNotification } from './notifications';
 
 export interface MessageDocument {
   id: string;
@@ -123,6 +124,19 @@ export async function sendMessage(
     updatedAt: Timestamp.now(),
   });
 
+  // Create a notification for the receiver (do not fail sending if notification fails)
+  try {
+    await createNotification({
+      title: 'New message',
+      description: data.content.length > 80 ? `${data.content.slice(0, 77)}...` : data.content,
+      type: 'info',
+      audience: 'user',
+      userId: data.receiverId,
+    });
+  } catch {
+    // ignore notification failures
+  }
+
   return docRef.id;
 }
 
@@ -136,20 +150,32 @@ export async function getMessages(
 ): Promise<MessageDocument[]> {
   const conversationId = getConversationId(userId1, userId2);
   const messagesRef = collection(db, MESSAGES_COLLECTION);
-  const q = query(
-    messagesRef,
-    where('conversationId', '==', conversationId),
-    orderBy('createdAt', 'desc'),
-    limit(limitCount)
-  );
 
-  const snapshot = await getDocs(q);
-  return snapshot.docs
-    .map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }))
-    .reverse() as MessageDocument[]; // Reverse to show oldest first
+  // Firestore security rules require queries to be scoped to the current user.
+  // Fetch both directions and merge client-side.
+  const [sentSnap, receivedSnap] = await Promise.all([
+    getDocs(query(messagesRef, where('conversationId', '==', conversationId), where('senderId', '==', userId1))),
+    getDocs(query(messagesRef, where('conversationId', '==', conversationId), where('receiverId', '==', userId1))),
+  ]);
+
+  const byId = new Map<string, MessageDocument>();
+  for (const snap of [sentSnap, receivedSnap]) {
+    snap.docs.forEach((d) => {
+      byId.set(d.id, { id: d.id, ...(d.data() as any) } as MessageDocument);
+    });
+  }
+
+  const items = Array.from(byId.values()).sort((a: any, b: any) => {
+    const at = a?.createdAt?.toMillis?.() || 0;
+    const bt = b?.createdAt?.toMillis?.() || 0;
+    return at - bt;
+  });
+
+  if (items.length > limitCount) {
+    return items.slice(items.length - limitCount);
+  }
+
+  return items;
 }
 
 /**
@@ -218,19 +244,44 @@ export function subscribeToMessages(
 ): Unsubscribe {
   const conversationId = getConversationId(userId1, userId2);
   const messagesRef = collection(db, MESSAGES_COLLECTION);
-  const q = query(
-    messagesRef,
-    where('conversationId', '==', conversationId),
-    orderBy('createdAt', 'asc')
+
+  // Firestore rules require scoping to current user, so subscribe to both directions.
+  let sentItems: MessageDocument[] = [];
+  let receivedItems: MessageDocument[] = [];
+
+  const emit = () => {
+    const byId = new Map<string, MessageDocument>();
+    for (const item of [...sentItems, ...receivedItems]) {
+      byId.set(item.id, item);
+    }
+    const merged = Array.from(byId.values()).sort((a: any, b: any) => {
+      const at = a?.createdAt?.toMillis?.() || 0;
+      const bt = b?.createdAt?.toMillis?.() || 0;
+      return at - bt;
+    });
+    callback(merged);
+  };
+
+  const unsubSent = onSnapshot(
+    query(messagesRef, where('conversationId', '==', conversationId), where('senderId', '==', userId1)),
+    (snapshot) => {
+      sentItems = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as MessageDocument[];
+      emit();
+    }
   );
 
-  return onSnapshot(q, (snapshot) => {
-    const messages = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as MessageDocument[];
-    callback(messages);
-  });
+  const unsubReceived = onSnapshot(
+    query(messagesRef, where('conversationId', '==', conversationId), where('receiverId', '==', userId1)),
+    (snapshot) => {
+      receivedItems = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as MessageDocument[];
+      emit();
+    }
+  );
+
+  return () => {
+    unsubSent();
+    unsubReceived();
+  };
 }
 
 /**
@@ -243,8 +294,7 @@ export function subscribeToConversations(
   const conversationsRef = collection(db, CONVERSATIONS_COLLECTION);
   const q = query(
     conversationsRef,
-    where('participantIds', 'array-contains', userId),
-    orderBy('lastMessageAt', 'desc')
+    where('participantIds', 'array-contains', userId)
   );
 
   return onSnapshot(q, (snapshot) => {
@@ -252,6 +302,13 @@ export function subscribeToConversations(
       id: doc.id,
       ...doc.data(),
     })) as ConversationDocument[];
+
+    conversations.sort((a, b) => {
+      const at = (a.lastMessageAt as any)?.toMillis?.() ?? 0;
+      const bt = (b.lastMessageAt as any)?.toMillis?.() ?? 0;
+      return bt - at;
+    });
+
     callback(conversations);
   });
 }

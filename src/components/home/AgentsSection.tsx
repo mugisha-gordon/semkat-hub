@@ -34,11 +34,12 @@ const AgentsSection = () => {
 
         const mapped = approvedAgents.map((u) => ({
           id: u.userId,
-          name: u.profile.fullName || 'Agent',
+          name: u.profile?.fullName || u.email || 'Agent',
           avatar:
-            u.profile.avatarUrl ||
-            'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-          phone: u.profile.phone || '',
+            u.profile?.avatarUrl ||
+            (u as any)?.avatarUrl ||
+            '',
+          phone: u.profile?.phone || '',
           email: u.email,
           rating: 4.5,
           totalListings: listingCounts[u.userId] || 0,
@@ -82,19 +83,30 @@ const AgentsSection = () => {
               style={{ animationDelay: `${index * 0.1}s` }}
             >
               <div className="relative mx-auto w-24 h-24 mb-4">
-                <img
-                  src={agent.avatar}
-                  alt={agent.name}
-                  className="w-full h-full rounded-full object-cover ring-4 ring-background shadow-lg group-hover:ring-primary/20 transition-all"
-                />
+                <Link to={`/profile/${agent.id}`} className="block">
+                  {agent.avatar ? (
+                    <img
+                      src={agent.avatar}
+                      alt={agent.name}
+                      className="w-full h-full rounded-full object-cover ring-4 ring-background shadow-lg group-hover:ring-primary/20 transition-all"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-full ring-4 ring-background shadow-lg bg-muted group-hover:ring-primary/20 transition-all" />
+                  )}
+                </Link>
                 <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-semkat-sky flex items-center justify-center text-secondary-foreground text-xs font-bold shadow">
                   {agent.rating}
                 </div>
               </div>
               
-              <h3 className="font-heading font-semibold text-foreground mb-1">
-                {agent.name}
-              </h3>
+              <Link to={`/profile/${agent.id}`} className="inline-block">
+                <h3 className="font-heading font-semibold text-foreground mb-1 hover:underline">
+                  {agent.name}
+                </h3>
+              </Link>
               
               <div className="flex items-center justify-center gap-1 text-sm text-muted-foreground mb-3">
                 <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />

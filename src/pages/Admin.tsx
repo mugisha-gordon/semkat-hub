@@ -12,8 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ShieldCheck, Users, FileText, Bell, UserPlus, Check, X, Clock, Trash2, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
-import { getAgentApplications, approveAgentApplication, rejectAgentApplication } from "@/integrations/firebase/agentApplications";
-import { updateUserRole, getAllAgents, deleteUserAndData, updateUserDocument } from "@/integrations/firebase/users";
+import { getAgentApplications, approveAgentApplication, rejectAgentApplication, subscribeToAgentApplications } from "@/integrations/firebase/agentApplications";
+import { updateUserRole, getAllAgents, deleteUserAndData, updateUserDocument, subscribeToAgents } from "@/integrations/firebase/users";
+import { createNotification } from "@/integrations/firebase/notifications";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { createUserDocument } from "@/integrations/firebase/users";
 import type { AgentApplicationDocument } from "@/integrations/firebase/types";
@@ -58,23 +59,51 @@ const AdminDashboard = () => {
   const [agentToDelete, setAgentToDelete] = useState<UserDocument | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    fetchApplications();
-    fetchAgents();
-  }, []);
-
   const fetchAgents = async () => {
     setAgentsLoading(true);
     try {
-      const allAgents = await getAllAgents(50);
-      setAgents(allAgents.filter(a => a.role !== 'admin')); // Don't show admins in agents list
-    } catch (error) {
+      const allAgents = await getAllAgents(100);
+      setAgents(allAgents.filter(a => a.role === 'agent'));
+    } catch (error: any) {
       console.error('Error fetching agents:', error);
-      toast.error('Failed to fetch agents');
+      toast.error(error.message || 'Failed to fetch agents');
     } finally {
       setAgentsLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Subscribe to applications and agents in real-time
+    const unsubApps = subscribeToAgentApplications((apps) => {
+      const transformedApps: AgentApplication[] = apps.map(app => ({
+        id: app.id,
+        userId: app.userId,
+        fullName: app.fullName,
+        phone: app.phone,
+        email: app.email,
+        company: app.company,
+        licenseNumber: app.licenseNumber,
+        experienceYears: app.experienceYears,
+        status: app.status,
+        createdAt: app.createdAt,
+      }));
+      setApplications(transformedApps);
+      setLoading(false);
+    }, undefined, 50);
+
+    setAgentsLoading(true);
+    const unsubAgents = subscribeToAgents((agentsList) => {
+      setAgents(agentsList.filter(a => a.role === 'agent'));
+      setAgentsLoading(false);
+    }, 100);
+
+    return () => {
+      try { unsubApps(); } catch {}
+      try { unsubAgents(); } catch {}
+    };
+  }, []);
+
+  // fetchAgents removed - real-time subscription handles agent list
 
   const handleDeleteAgent = (agent: UserDocument) => {
     setAgentToDelete(agent);
@@ -107,9 +136,9 @@ const AdminDashboard = () => {
   };
 
   const fetchApplications = async () => {
+    // kept for manual refresh if needed
     try {
       const apps = await getAgentApplications(undefined, undefined, 50);
-      // Transform Firestore documents to match component interface
       const transformedApps: AgentApplication[] = apps.map(app => ({
         id: app.id,
         userId: app.userId,
@@ -139,11 +168,29 @@ const AdminDashboard = () => {
 
       if (action === 'approved') {
         // Approve application and update user role
-        await approveAgentApplication(applicationId, userId, user.uid);
+        await approveAgentApplication(applicationId, user.uid, null);
         await updateUserRole(userId, 'agent', user.uid);
+        try {
+          await createNotification({
+            audience: 'user',
+            userId,
+            type: 'success',
+            title: 'Agent application approved',
+            description: 'Your agent application has been approved. Please sign out and sign in again to access the Agent Dashboard.',
+          });
+        } catch {}
       } else {
         // Reject application
-        await rejectAgentApplication(applicationId, user.uid);
+        await rejectAgentApplication(applicationId, user.uid, null);
+        try {
+          await createNotification({
+            audience: 'user',
+            userId,
+            type: 'warning',
+            title: 'Agent application rejected',
+            description: 'Your agent application was rejected. You can review your details and apply again.',
+          });
+        } catch {}
       }
 
       toast.success(`Application ${action}`);
@@ -189,11 +236,18 @@ const AdminDashboard = () => {
 
       await secondaryAuth.signOut();
 
-      toast.success('Agent registered successfully');
+      // Show success message with credentials
+      const successMessage = `Agent account created successfully!\n\nCredentials:\nEmail: ${registerForm.email}\nPassword: ${registerForm.password}\n\nPlease provide these credentials to the agent.`;
+      toast.success(successMessage, {
+        duration: 8000,
+        description: `Agent: ${registerForm.fullName} can now login with the provided credentials.`,
+      });
+      
       setIsRegisterOpen(false);
       setRegisterForm({ email: '', password: '', fullName: '', phone: '', company: '' });
 
-      fetchAgents();
+      // Refresh agents list to show newly registered agent
+      await fetchAgents();
       fetchApplications();
     } catch (err: any) {
       console.error('Error registering agent:', err);
@@ -223,7 +277,16 @@ const AdminDashboard = () => {
             </div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
               {user && <PropertyPostForm agentId={user.uid} onSuccess={() => {}} />}
-              {user && <VideoPostForm onSuccess={() => navigate('/explore', { state: { fromUpload: true } })} />}
+              {user && (
+                <VideoPostForm 
+                  onSuccess={() => {
+                    // Navigate to Explore after successful upload
+                    setTimeout(() => {
+                      navigate('/explore', { state: { fromUpload: true } });
+                    }, 500);
+                  }} 
+                />
+              )}
               <Dialog open={isRegisterOpen} onOpenChange={setIsRegisterOpen}>
                 <DialogTrigger asChild>
                   <Button variant="hero" className="gap-2 text-xs sm:text-sm">
@@ -337,40 +400,65 @@ const AdminDashboard = () => {
             </Card>
           </div>
 
-          {/* Manage Agents Section */}
+          {/* Registered Agents Section */}
           <Card className="bg-white/5 border-white/10 text-white p-6 mb-6">
-            <div className="flex items-center gap-3 mb-6">
-              <Users className="h-5 w-5 text-sky-300" />
-              <h3 className="font-heading text-xl font-semibold">Manage Agents</h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-3 min-w-0">
+                <Users className="h-5 w-5 text-sky-300" />
+                <h3 className="font-heading text-xl font-semibold">Registered Agents</h3>
+                {agents.length > 0 && (
+                  <Badge className="bg-semkat-orange text-white">{agents.length}</Badge>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchAgents}
+                disabled={agentsLoading}
+                className="border-white/30 text-white hover:bg-white/10"
+              >
+                Refresh
+              </Button>
             </div>
             
             {agentsLoading ? (
-              <p className="text-white/60 text-center py-8">Loading agents...</p>
+              <div className="text-center py-8">
+                <div className="w-8 h-8 border-4 border-semkat-orange border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                <p className="text-white/60">Loading agents...</p>
+              </div>
             ) : agents.length === 0 ? (
-              <p className="text-white/60 text-center py-8">No agents found</p>
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-white/20 mx-auto mb-3" />
+                <p className="text-white/60">No registered agents yet</p>
+                <p className="text-white/40 text-sm mt-1">Register an agent using the "Register Agent" button above</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {agents.map((agent) => (
                   <div
                     key={agent.userId}
-                    className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
                   >
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
-                        <h4 className="font-semibold">{agent.profile.fullName || 'Unknown'}</h4>
-                        <Badge variant="outline" className="border-green-500/50 text-green-400">
-                          Agent
+                        <h4 className="font-semibold">{agent.profile.fullName || agent.email || 'Unknown'}</h4>
+                        <Badge variant="outline" className="border-green-500/50 text-green-400 bg-green-500/10">
+                          <Check className="h-3 w-3 mr-1" />
+                          Active Agent
                         </Badge>
                       </div>
                       <p className="text-white/60 text-sm">{agent.email}</p>
                       {agent.profile.phone && (
                         <p className="text-white/50 text-xs mt-1">Phone: {agent.profile.phone}</p>
                       )}
+                      {(agent.profile as any).company && (
+                        <p className="text-white/50 text-xs mt-1">Company: {(agent.profile as any).company}</p>
+                      )}
                     </div>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-red-500/50 text-red-400 hover:bg-red-500/20"
+                      className="border-red-500/50 text-red-400 hover:bg-red-500/20 sm:shrink-0"
                       onClick={() => handleDeleteAgent(agent)}
                     >
                       <Trash2 className="h-4 w-4 mr-1" />
@@ -390,7 +478,7 @@ const AdminDashboard = () => {
             </div>
             
             <Tabs defaultValue="pending" className="w-full">
-              <TabsList className="bg-white/5 border-white/10">
+              <TabsList className="bg-white/5 border-white/10 flex flex-wrap h-auto">
                 <TabsTrigger value="pending" className="data-[state=active]:bg-semkat-orange">
                   Pending ({applications.filter(a => a.status === 'pending').length})
                 </TabsTrigger>
@@ -415,9 +503,9 @@ const AdminDashboard = () => {
                         .map(app => (
                           <div
                             key={app.id}
-                            className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10"
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg bg-white/5 border border-white/10"
                           >
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-3 mb-1">
                                 <h4 className="font-semibold">{app.fullName}</h4>
                                 <Badge 
@@ -440,7 +528,7 @@ const AdminDashboard = () => {
                               )}
                             </div>
                             {status === 'pending' && (
-                              <div className="flex gap-2">
+                              <div className="flex flex-wrap gap-2 sm:justify-end">
                                 <Button
                                   size="sm"
                                   variant="outline"

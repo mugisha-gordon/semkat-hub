@@ -9,16 +9,16 @@ interface WelcomeBackProps {
 }
 
 const WelcomeBack = ({ onComplete }: WelcomeBackProps) => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const [show, setShow] = useState(true);
 
   useEffect(() => {
-    // Faster auto-dismiss (1.5 seconds)
+    // Auto-dismiss after at least 6 seconds
     const timer = setTimeout(() => {
       setShow(false);
       setTimeout(onComplete, 300);
-    }, 1500);
+    }, 6000);
 
     return () => clearTimeout(timer);
   }, [onComplete]);
@@ -27,7 +27,8 @@ const WelcomeBack = ({ onComplete }: WelcomeBackProps) => {
     setShow(false);
     setTimeout(() => {
       onComplete();
-      navigate("/");
+      const destination = role === "admin" ? "/admin" : role === "agent" ? "/agent-dashboard" : "/dashboard";
+      navigate(destination);
     }, 300);
   };
 

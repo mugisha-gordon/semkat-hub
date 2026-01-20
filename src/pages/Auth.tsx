@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, type Location } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,9 +18,9 @@ const Auth = () => {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp, signInWithGoogle, user, role, loading: authLoading } = useAuth();
+  const { signIn, signUp, signInWithGoogle, user, role, loading: authLoading, error: authError } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation() as { state?: { from?: string } };
+  const location = useLocation() as Location & { state?: { from?: string } };
   const [pendingRedirect, setPendingRedirect] = useState(false);
 
   // Hard-coded admin email check
@@ -37,6 +37,21 @@ const Auth = () => {
   const from = location.state?.from;
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) return;
+    if (pendingRedirect) return;
+
+    const isAdminEmail = user.email === ADMIN_EMAIL;
+    const effectiveRole = isAdminEmail ? 'admin' : role;
+    if (!isAdminEmail && !effectiveRole) return;
+
+    const target = getRoleHome(effectiveRole, user.email);
+    if (location.pathname === '/auth') {
+      navigate(target, { replace: true });
+    }
+  }, [authLoading, user, role, pendingRedirect, navigate, location.pathname]);
+
+  useEffect(() => {
     if (!pendingRedirect) return;
     if (authLoading) return;
     if (!user) return;
@@ -44,6 +59,9 @@ const Auth = () => {
     // Check admin email directly for immediate redirect
     const isAdminEmail = user.email === ADMIN_EMAIL;
     const effectiveRole = isAdminEmail ? 'admin' : role;
+
+    // Non-admin accounts must wait until role is resolved
+    if (!isAdminEmail && !effectiveRole) return;
     
     const roleHome = getRoleHome(effectiveRole, user.email);
     const safeFrom = from && from !== '/auth' ? from : null;
@@ -65,6 +83,11 @@ const Auth = () => {
     navigate(target, { replace: true });
     setPendingRedirect(false);
   }, [pendingRedirect, authLoading, user, role, from, navigate]);
+
+  useEffect(() => {
+    if (!authError) return;
+    setError(authError);
+  }, [authError]);
 
   const handleLogin = async () => {
     setError(null);
@@ -144,7 +167,7 @@ const Auth = () => {
                   <div>
                     <h4 className="font-semibold text-white mb-1">Want to become an agent?</h4>
                     <p className="text-white/70 text-sm">
-                      Agent registration is managed by administrators. Contact Semkat Group to apply for an agent account.
+                      Create a normal account first, then go to your Dashboard and use “Apply to be Agent”. Admin will review and approve.
                     </p>
                   </div>
                 </div>
@@ -159,6 +182,11 @@ const Auth = () => {
                 </TabsList>
 
                 <TabsContent value="login" className="space-y-4 pt-4">
+                  {error && (
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+                      {error}
+                    </div>
+                  )}
                   {/* Google Sign In */}
                   <Button 
                     variant="outline" 
@@ -239,22 +267,6 @@ const Auth = () => {
                     <div className="relative flex justify-center text-xs uppercase">
                       <span className="bg-white/5 px-2 text-white/50">Or register with email</span>
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-sm text-white/70 mb-2">
-                    <UserPlus className="h-4 w-4 text-sky-300" />
-                    Create an account to browse and save properties
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="fullName">Full Name</Label>
-                    <Input
-                      id="fullName"
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="John Doe"
-                      className="bg-white/10 border-white/20 text-white"
-                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email-register">Email</Label>

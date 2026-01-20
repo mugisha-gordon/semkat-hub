@@ -11,12 +11,16 @@ import About from "./pages/About";
 import Favorites from "./pages/Favorites";
 import Notifications from "./pages/Notifications";
 import NotificationDetail from "./pages/NotificationDetail";
+import Messages from "./pages/Messages";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import AgentDashboard from "./pages/AgentDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import Explore from "./pages/Explore";
 import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import StatusBar from "./components/layout/StatusBar";
 import { AuthProvider } from "./context/AuthContext";
@@ -37,7 +41,10 @@ const App = () => (
           <BrowserRouter>
             <OnboardingWrapper>
               <BackButtonHandler />
-              <div className="pb-20 sm:pb-24">
+              <div
+                className="pb-20 sm:pb-24"
+                style={{ paddingBottom: "calc(5rem + env(safe-area-inset-bottom, 0px) + 12px)" }}
+              >
                 <Routes>
                   <Route path="/" element={<Index />} />
                   <Route path="/properties" element={<Properties />} />
@@ -49,7 +56,19 @@ const App = () => (
                   <Route path="/favorites" element={<Favorites />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/notifications/:id" element={<NotificationDetail />} />
+                  <Route
+                    path="/messages"
+                    element={
+                      <ProtectedRoute>
+                        <Messages />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="/privacy" element={<Privacy />} />
+                  <Route path="/terms" element={<Terms />} />
+                  
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/profile/:userId" element={<Profile />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route
                     path="/admin"
